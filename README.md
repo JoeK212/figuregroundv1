@@ -2,9 +2,9 @@
 
 A generative black & white ambiguity tool. Single-file HTML/JS, no build step.
 
-**Live:** `⚠ TODO — e.g. figure-ground.axisbim.io`
-**Repo:** `⚠ TODO — e.g. JoeK212/figure-ground`
-**Deploy:** `⚠ TODO — e.g. Netlify continuous deployment from main`
+**Live:** [blackwhitefigurestudies.netlify.app](https://blackwhitefigurestudies.netlify.app)
+**Repo:** `JoeK212/figuregroundv1`
+**Deploy:** Netlify continuous deployment from `main`
 
 ---
 
@@ -40,21 +40,21 @@ Compositions are seed-based — every result is unique but reproducible.
 ## Project structure
 
 ```
-figure-ground/
-├── index.html          Single-file app — HTML, CSS, JS, Three.js scene, all in one
-├── audit_deploy.js      61-check pre-deploy validation script
-└── HANDOFF_v1.3.1.md    Per-version changelog and handoff notes
+figuregroundv1/
+├── index.html      Single-file app — HTML, CSS, JS, Three.js scene, all in one
+└── README.md       This file
 ```
 
 There is no build step. `index.html` is deployed as-is.
 
 ## Development workflow
 
-Active development happens in versioned sessions, each producing `index.html`
-plus `audit_deploy.js` (a static-analysis QA pass — run with
-`node audit_deploy.js`) and a per-version `HANDOFF_vX.X.X.md` changelog. A new
-session starts by re-running the audit against the current `index.html` to
-confirm the starting state is clean before making changes.
+Active development happens in versioned sessions. Each session produces the
+current `index.html` plus two working files that support the process but
+aren't part of this repo: `audit_deploy.js` (a static-analysis QA pass — run
+with `node audit_deploy.js`) and a per-version `HANDOFF_vX.X.X.md` changelog.
+A new session starts by re-running the audit against the current `index.html`
+to confirm the starting state is clean before making changes.
 
 ## Critical invariants — do not modify
 
@@ -101,9 +101,8 @@ serve it with any static file server.
 
 ## Deployment
 
-`⚠ TODO — fill in once the repo and hosting are set up, e.g.:`
-`Push to main on JoeK212/figure-ground — Netlify continuous deployment builds
-and publishes automatically to [site].netlify.app, aliased at [subdomain].axisbim.io.`
+Push to `main` on `JoeK212/figuregroundv1` — Netlify continuous deployment
+builds and publishes automatically to `blackwhitefigurestudies.netlify.app`.
 
 ---
 
