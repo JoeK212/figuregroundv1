@@ -7,6 +7,7 @@ Joe.K · axisbim.io
 **Repo:** [github.com/JoeK212/figuregroundv1](https://github.com/JoeK212/figuregroundv1)
 
 ## Files this version produces
+
 - `index.html` — the site
 - `audit_deploy.js` — static QA pass, 85 checks, run with `node audit_deploy.js`
 - `netlify.toml` — Netlify deploy config (added post-v1.6.1, no app code
@@ -58,6 +59,7 @@ Added three sliders — Count (1–4), Strength (0.25x–2x), Falloff
 Falloff are applied as multipliers at render time via a new
 `effectiveAttractors()` helper rather than mutating the seeded attractor
 points directly, so:
+
 - dragging a marker still starts from its true seeded position even after
   the sliders have been tuned away from 1x
 - the seed/count persistence guarantee (attractors don't silently
@@ -75,6 +77,7 @@ generators on every drag/slider tick" principle already established for
 attractor-marker dragging.
 
 ## Current state
+
 Three generation modes (Truchet, Blend, Waves), each with a 2D SVG render and
 a matching 3D relief render (Three.js r128 via cdnjs), sharing one seeded
 data-generation function per mode so both views always match. Whole-page
@@ -90,6 +93,7 @@ count change, not on every slider tweak. Footer credit/version is visible at
 every viewport width.
 
 ## Invariants — do not touch without re-running the audit
+
 - **Three.js CDN path must keep the `r` prefix**: `three.js/r128/three.min.js`,
   not `three.js/128/...`. cdnjs 404s silently on the wrong path — this was a
   real bug in v1.1.0 that produced a blank 3D view with no console-visible
@@ -174,6 +178,7 @@ every viewport width.
   visible unconditionally, which only works outside the scrollable area.
 
 ## Known approximation (flagged, not a bug)
+
 Blend mode's 3D relief is a **stepped-layer interpretation**, not a literal
 3D equivalent of `mix-blend-mode: difference` — blend modes are a pure 2D
 compositing concept with no direct 3D analog. Each shape is extruded at an
@@ -181,6 +186,7 @@ increasing base elevation by draw order, producing a sedimentary look.
 Documented in code comments; revisit if it doesn't read well.
 
 ## Open items
+
 - The metalness:0 fix in this version was diagnosed from the reported
   screenshots and period-accurate Three.js r128 docs, not from an actual
   re-render in this environment (no headless-browser/WebGL path available
@@ -208,6 +214,7 @@ Documented in code comments; revisit if it doesn't read well.
   not new to this version).
 
 ## Deployment
+
 `netlify.toml` added: `publish = "."`, no build command (nothing to
 compile — it's one static `index.html`), plus baseline security headers
 and a no-cache rule on `index.html` so a fresh deploy is never served
@@ -223,7 +230,7 @@ consistent with the other projects.
 To push this to `JoeK212/figuregroundv1` and let Netlify's continuous
 deployment pick it up from `main`, from the repo's local working copy:
 
-```bash
+```
 cp index.html audit_deploy.js netlify.toml HANDOFF_v1.6.1.md /path/to/figuregroundv1/
 cd /path/to/figuregroundv1
 git add index.html audit_deploy.js netlify.toml HANDOFF_v1.6.1.md
@@ -234,9 +241,10 @@ git push origin main
 Netlify will pick up the push automatically and deploy to
 blackwhitefigurestudies.netlify.app. This step needs to happen from your
 machine — pushing requires your GitHub credentials, which isn't something
-I can do on your behalf.
+Claude can do on your behalf.
 
 ## Changelog
+
 v1.0.0 — Initial build: Truchet, Blend, Waves modes, whole-page invert, SVG/PNG export.
 v1.1.0 — Added 3D relief view, auto-orbit, relief-height control.
 v1.1.1 — Fixed Three.js CDN path bug; added load-failure fallback message.

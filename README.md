@@ -1,36 +1,65 @@
 # FIGURE / GROUND
 
-**Which is which?** A generative black & white ambiguity tool — three
-pattern modes, a whole-page invert as the core interaction, and a matching
-3D relief view.
+Generative black & white ambiguity in the browser.
 
 **Live:** [blackwhitefigurestudies.netlify.app](https://blackwhitefigurestudies.netlify.app)
 
-## What it does
+## What it is
 
-- **Truchet, Blend, and Waves** — three seeded generative pattern modes,
-  each rendered as flat black & white 2D and as an extruded 3D relief
-  from the same underlying data, so both views always match.
-- **Invert** flips the whole page (`filter:invert(1)`) — the piece's core
-  interaction: is the black the figure, or is the white?
-- **3D relief view** — auto-orbiting camera, drag to rotate, scroll-wheel
-  or pinch to zoom.
-- **Attractors** — seeded points that pull nearby shapes taller or shorter
-  in the 3D view, with tunable count, strength, and falloff. Draggable
-  directly on the 2D canvas.
-- Export as SVG or PNG.
+A seeded, deterministic pattern generator exploring figure-ground
+perceptual ambiguity — the classic design/perception question of which
+part of a composition reads as "figure" and which as "ground." Every
+plate is reproducible from its seed.
 
-Built single-file, no build step — one `index.html`, Three.js loaded from
-a CDN.
+Three generation modes, each with a matching 2D and 3D view:
+
+- **Truchet** — quarter-disk tiles that flow into maze-like curves where
+  it's genuinely hard to tell which channel is figure and which is ground.
+- **Blend** — overlapping shapes composited with `mix-blend-mode: difference`,
+  so regions emerge from overlap rather than being drawn directly.
+- **Waves** — sinusoidal stripe bands that ripple against each other,
+  Op-art moiré style.
+
+## Invert
+
+The core interaction: **Invert** flips the entire page — canvas and
+interface both — via `filter:invert(1)`, not just the artwork. Which of
+black/white reads as "figure" reverses in one move.
+
+## 3D relief view
+
+Switch to **3D** to see the current pattern extruded into a physical
+relief sculpture — black regions become raised geometry on a paper-colored
+base plate. Auto-orbiting camera, with manual click/touch-drag override
+and scroll-wheel/pinch zoom.
+
+## Attractor
+
+Toggle **Attractor** to add 1–4 seeded points that pull nearby shapes
+taller (or shorter, for negative-strength points) via gaussian falloff —
+an easy way to coax more sculptural, less uniform compositions out of the
+3D relief. Points are draggable directly in the 2D view; **Count**,
+**Strength**, and **Falloff** sliders tune the effect once it's on.
+
+## Controls
+
+- **Seed** — set directly, or click Generate for a random one
+- **Density** — controls shape/cell/stripe count
+- **Relief** — extrusion height in the 3D view
+- **Save SVG / Save PNG** — export the current plate
 
 ## Tech
 
-HTML / vanilla JS / SVG / [Three.js](https://threejs.org) (r128). Deployed
-via Netlify continuous deployment from `main`.
+Single-file HTML/CSS/JS, no build step. Deterministic output via a seeded
+PRNG (mulberry32), decorrelated per-feature so toggles never perturb the
+underlying pattern. 3D rendered with Three.js (r128, via cdnjs).
+
+## Development
+
+See `HANDOFF_v1.6.1.md` for the full engineering history, invariants
+(things that will silently break if touched carelessly), and open items.
+`audit_deploy.js` is a static QA pass over `index.html` — run it with
+`node audit_deploy.js` before pushing changes.
 
 ---
-
 Joe.K · [axisbim.io](https://axisbim.io)
-
-Full build history, invariants, and technical notes: see
-`HANDOFF_v1.7.1.md` (local dev file, not tracked in this repo).
