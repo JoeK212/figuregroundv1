@@ -33,4 +33,4 @@ via Netlify continuous deployment from `main`.
 Joe.K · [axisbim.io](https://axisbim.io)
 
 Full build history, invariants, and technical notes: see
-[`HANDOFF_v1.6.1.md`](./HANDOFF_v1.6.1.md).
+`HANDOFF_v1.7.1.md` (local dev file, not tracked in this repo).

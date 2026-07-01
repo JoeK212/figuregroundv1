@@ -73,6 +73,31 @@
            figure from ground in 3D regardless of relief height. Both
            materials are matte, fully non-metallic surfaces, so this is
            also just the physically correct value.
+  v1.7.0 — Redesigned the control bar: two explicit wrapping rows instead
+           of one fixed-height row with hidden horizontal overflow, which
+           had started silently clipping controls (Strength/Falloff)
+           off-screen with no visible scroll affordance once Attractor
+           tuning was added. Added a Plan view button — a true
+           OrthographicCamera (not just a perspective camera pointed
+           straight down) snapped to a top-down view of the 3D relief, so
+           the pattern reads without perspective foreshortening. Its
+           frustum size is derived from the same bounding sphere as
+           orbitRadius, and zoomFactor scales it the same direction as
+           perspective zoom. Auto-orbit is suppressed while in plan view.
+           Clicking Plan from the 2D view auto-enables 3D rather than
+           doing nothing.
+  v1.7.1 — Fixed Plan view state leaking across 3D toggles: leaving 3D
+           (via the 3D button) didn't clear is3DPlanView or the Plan
+           button's active class, so re-entering 3D later silently
+           dropped back into Plan (orthographic, no auto-orbit) with no
+           button showing why. Leaving 3D now also clears Plan state.
+           Blend mode switched from pure uniform-random shape placement
+           to jittered-grid placement: uniform random points reliably
+           read as "clumped" to the eye even though nothing was actually
+           wrong with the math. Canvas is now divided into a shuffled
+           grid sized to the shape count, with jitter within each cell,
+           spreading shapes across the full canvas while keeping
+           placement randomized.
 -->
 <html lang="en">
 <head>
@@ -165,14 +190,21 @@
   }
 
   .bar{
-    height:var(--bar-h);
     flex-shrink:0;
     border-top:2px solid var(--ink);
     display:flex;
+    flex-direction:column;
+  }
+  .bar-row{
+    display:flex;
     align-items:center;
-    gap:22px;
-    padding:0 24px;
-    overflow-x:auto;
+    flex-wrap:wrap;
+    min-height:var(--bar-h);
+    gap:14px 22px;
+    padding:10px 24px;
+  }
+  .bar-row + .bar-row{
+    border-top:1px solid rgba(10,10,10,0.15);
   }
   .group{
     display:flex;
@@ -253,7 +285,7 @@
 
   @media (max-width:720px){
     .wordmark{top:16px;left:16px;}
-    .bar{gap:16px;padding:0 16px;}
+    .bar-row{gap:10px 16px;padding:8px 16px;}
     .group + .group{padding-left:16px;}
     .footer-credit{display:none;}
     .footer-credit-mobile{display:flex;}
@@ -272,51 +304,56 @@
   </div>
 
   <div class="bar">
-    <div class="group">
-      <button class="active" id="modeTruchet">Truchet</button>
-      <button id="modeBlend">Blend</button>
-      <button id="modeWaves">Waves</button>
+    <div class="bar-row">
+      <div class="group">
+        <button class="active" id="modeTruchet">Truchet</button>
+        <button id="modeBlend">Blend</button>
+        <button id="modeWaves">Waves</button>
+      </div>
+
+      <div class="group">
+        <span class="field-label">Seed</span>
+        <input type="number" id="seedInput" min="1" max="999999" value="1">
+      </div>
+
+      <div class="group">
+        <span class="field-label">Density</span>
+        <input type="range" id="densitySlider" min="1" max="10" value="5">
+      </div>
+
+      <div class="group">
+        <button class="solid" id="regenBtn">Generate</button>
+        <button id="invertBtn">Invert</button>
+      </div>
+
+      <div class="group">
+        <button id="downloadSvg">Save SVG</button>
+        <button id="downloadPng">Save PNG</button>
+      </div>
     </div>
 
-    <div class="group">
-      <span class="field-label">Seed</span>
-      <input type="number" id="seedInput" min="1" max="999999" value="1">
-    </div>
+    <div class="bar-row">
+      <div class="group">
+        <button id="view3dBtn">3D</button>
+        <button id="planViewBtn" title="Snap to a top-down orthographic view of the 3D relief">Plan</button>
+        <span class="field-label">Relief</span>
+        <input type="range" id="reliefSlider" min="1" max="10" value="5">
+        <button id="orbitToggle">Pause orbit</button>
+        <button id="attractorToggle">Attractor</button>
+      </div>
 
-    <div class="group">
-      <span class="field-label">Density</span>
-      <input type="range" id="densitySlider" min="1" max="10" value="5">
-    </div>
+      <div class="group" id="attractorControlsGroup">
+        <span class="field-label">Count</span>
+        <input type="range" id="attractorCountSlider" min="1" max="4" value="2">
+        <span class="field-label">Strength</span>
+        <input type="range" id="attractorStrengthSlider" min="25" max="200" value="100">
+        <span class="field-label">Falloff</span>
+        <input type="range" id="attractorFalloffSlider" min="50" max="200" value="100">
+      </div>
 
-    <div class="group">
-      <button class="solid" id="regenBtn">Generate</button>
-      <button id="invertBtn">Invert</button>
-    </div>
-
-    <div class="group">
-      <button id="view3dBtn">3D</button>
-      <span class="field-label">Relief</span>
-      <input type="range" id="reliefSlider" min="1" max="10" value="5">
-      <button id="orbitToggle">Pause orbit</button>
-      <button id="attractorToggle">Attractor</button>
-    </div>
-
-    <div class="group" id="attractorControlsGroup">
-      <span class="field-label">Count</span>
-      <input type="range" id="attractorCountSlider" min="1" max="4" value="2">
-      <span class="field-label">Strength</span>
-      <input type="range" id="attractorStrengthSlider" min="25" max="200" value="100">
-      <span class="field-label">Falloff</span>
-      <input type="range" id="attractorFalloffSlider" min="50" max="200" value="100">
-    </div>
-
-    <div class="group">
-      <button id="downloadSvg">Save SVG</button>
-      <button id="downloadPng">Save PNG</button>
-    </div>
-
-    <div class="footer-credit">
-      Joe.K · <a href="https://axisbim.io" target="_blank" rel="noopener">axisbim.io</a> — <span id="appVersion"></span>
+      <div class="footer-credit">
+        Joe.K · <a href="https://axisbim.io" target="_blank" rel="noopener">axisbim.io</a> — <span id="appVersion"></span>
+      </div>
     </div>
   </div>
 
@@ -328,7 +365,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
-  const APP_VERSION = 'v1.6.1';
+  const APP_VERSION = 'v1.7.1';
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.getElementById('canvas');
   const seedInput = document.getElementById('seedInput');
@@ -396,9 +433,25 @@
     const pick = (arr) => arr[Math.floor(rnd()*arr.length)];
     const count = 6 + density * 3;
     const shapes = [];
+    // Jittered-grid placement instead of pure uniform-random cx/cy: uniform
+    // random points reliably look "clumped" to the eye (several shapes
+    // landing near each other by chance, other regions left empty). Laying
+    // out a shuffled grid and jittering within each cell keeps placement
+    // randomized while spreading shapes across the full canvas.
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    const cellW = 1000 / cols, cellH = 1000 / rows;
+    const cells = [];
+    for(let r=0; r<rows; r++) for(let c=0; c<cols; c++) cells.push([r,c]);
+    for(let i=cells.length-1;i>0;i--){
+      const j = Math.floor(rnd()*(i+1));
+      [cells[i],cells[j]] = [cells[j],cells[i]];
+    }
     for(let i=0;i<count;i++){
+      const [r,c] = cells[i];
+      const cx = c*cellW + rand(0.2,0.8)*cellW;
+      const cy = r*cellH + rand(0.2,0.8)*cellH;
       const shapeType = pick(['circle','rect']);
-      const cx = rand(0,1000), cy = rand(0,1000);
       if(shapeType === 'circle'){
         shapes.push({ type:'circle', cx, cy, r: rand(80,340) });
       } else {
@@ -549,7 +602,7 @@
   }
 
   // ---------- 3D SCENE ----------
-  let scene3, camera3, renderer3, group3, animFrame3;
+  let scene3, camera3, cameraOrtho3, renderer3, group3, animFrame3;
   let theta3 = 0.6, phi3 = 0.55;
   let orbitTarget = {x:0, y:60, z:0};
   let orbitRadius = 950;
@@ -559,6 +612,16 @@
   // the base framing calculation per the camera-radius invariant.
   const MIN_ZOOM = 0.4, MAX_ZOOM = 2.5;
   let zoomFactor = 1;
+  // Plan view swaps to a true OrthographicCamera looking straight down,
+  // rather than just pointing the perspective camera downward — a
+  // perspective camera retains foreshortening at any angle, which would
+  // still distort the relief pattern relative to the flat 2D SVG plan.
+  // planOrthoHalf (the camera's half-width/height) is derived from the
+  // same bounding sphere buildScene3D() already computes for orbitRadius,
+  // so it stays in sync with model size the same way perspective framing
+  // does — see the camera-radius invariant.
+  let is3DPlanView = false;
+  let planOrthoHalf = 700;
 
   function ensure3D(){
     if(renderer3) return;
@@ -569,6 +632,7 @@
     scene3 = new THREE.Scene();
     scene3.background = new THREE.Color(0xFAFAF9);
     camera3 = new THREE.PerspectiveCamera(38, 1, 1, 5000);
+    cameraOrtho3 = new THREE.OrthographicCamera(-planOrthoHalf, planOrthoHalf, planOrthoHalf, -planOrthoHalf, 1, 5000);
     renderer3 = new THREE.WebGLRenderer({antialias:true});
     renderer3.shadowMap.enabled = true;
     stage3d.appendChild(renderer3.domElement);
@@ -718,6 +782,7 @@
     orbitTarget = sphere.center.clone();
     const fovRad = camera3.fov * Math.PI / 180;
     orbitRadius = (sphere.radius / Math.sin(fovRad/2)) * 1.25;
+    planOrthoHalf = sphere.radius * 1.15;
   }
 
   function applySquareSize(){
@@ -807,13 +872,30 @@
 
   function animate3(){
     animFrame3 = requestAnimationFrame(animate3);
-    if(orbiting && !isDragging) theta3 += 0.0035;
-    const effRadius = orbitRadius * zoomFactor;
-    camera3.position.x = orbitTarget.x + effRadius * Math.cos(theta3) * Math.cos(phi3);
-    camera3.position.z = orbitTarget.z + effRadius * Math.sin(theta3) * Math.cos(phi3);
-    camera3.position.y = orbitTarget.y + effRadius * Math.sin(phi3);
-    camera3.lookAt(orbitTarget.x, orbitTarget.y, orbitTarget.z);
-    renderer3.render(scene3, camera3);
+    // Auto-orbit is meaningless in plan view (a top-down ortho camera
+    // spinning around its own look axis doesn't change what's visible)
+    // and would just make the plan silently drift if left running, so it's
+    // suppressed the same way isDragging suppresses it.
+    if(orbiting && !isDragging && !is3DPlanView) theta3 += 0.0035;
+    if(is3DPlanView){
+      const half = planOrthoHalf * zoomFactor;
+      cameraOrtho3.left = -half; cameraOrtho3.right = half;
+      cameraOrtho3.top = half; cameraOrtho3.bottom = -half;
+      cameraOrtho3.near = 1; cameraOrtho3.far = 5000;
+      cameraOrtho3.updateProjectionMatrix();
+      cameraOrtho3.position.set(orbitTarget.x, orbitTarget.y + 2000, orbitTarget.z);
+      cameraOrtho3.up.set(0, 0, -1);
+      cameraOrtho3.lookAt(orbitTarget.x, orbitTarget.y, orbitTarget.z);
+      renderer3.render(scene3, cameraOrtho3);
+    } else {
+      const effRadius = orbitRadius * zoomFactor;
+      camera3.position.x = orbitTarget.x + effRadius * Math.cos(theta3) * Math.cos(phi3);
+      camera3.position.z = orbitTarget.z + effRadius * Math.sin(theta3) * Math.cos(phi3);
+      camera3.position.y = orbitTarget.y + effRadius * Math.sin(phi3);
+      camera3.up.set(0, 1, 0);
+      camera3.lookAt(orbitTarget.x, orbitTarget.y, orbitTarget.z);
+      renderer3.render(scene3, camera3);
+    }
   }
 
   function refresh(){
@@ -879,8 +961,31 @@
     document.getElementById('view3dBtn').classList.toggle('active', is3D);
     svg.classList.toggle('hidden', is3D);
     stage3d.classList.toggle('active', is3D);
+    // Plan view only makes sense inside 3D — leaving 3D must also clear
+    // Plan state, or re-entering 3D later silently drops back into Plan
+    // (orthographic, no auto-orbit) with no button showing why.
+    if(!is3D && is3DPlanView){
+      is3DPlanView = false;
+      document.getElementById('planViewBtn').classList.remove('active');
+    }
     applySquareSize();
     if(is3D) refresh();
+  });
+
+  document.getElementById('planViewBtn').addEventListener('click', (e) => {
+    is3DPlanView = !is3DPlanView;
+    e.target.classList.toggle('active', is3DPlanView);
+    // Plan view only makes sense once already in 3D — clicking it from the
+    // 2D view switches into 3D at the same time rather than doing nothing,
+    // since "go to plan" is a reasonable thing to ask for from either view.
+    if(is3DPlanView && !is3D){
+      is3D = true;
+      document.getElementById('view3dBtn').classList.add('active');
+      svg.classList.add('hidden');
+      stage3d.classList.add('active');
+      applySquareSize();
+      refresh();
+    }
   });
 
   document.getElementById('orbitToggle').addEventListener('click', (e) => {
