@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<!--
+  FIGURE / GROUND — Generative Black & White Ambiguity
+  Joe.K · axisbim.io
+
+  CHANGELOG
+  v1.0.0 — Initial build: Truchet, Blend, and Waves generation modes,
+           whole-page invert (filter:invert(1)) as the core interaction,
+           SVG/PNG export.
+  v1.1.0 — Added 3D relief view (Three.js): black regions extruded into
+           physical geometry, auto-orbiting camera, relief-height control.
+           Refactored generators into pure data functions shared by the
+           2D SVG renderer and the 3D scene builder.
+  v1.1.1 — Fixed Three.js CDN path (was "128", cdnjs requires "r128" prefix,
+           causing silent 404 and blank 3D view). Added visible fallback
+           message if the 3D library fails to load.
+  v1.2.0 — Replaced CSS aspect-ratio sizing (unreliable on an empty div)
+           with deterministic JS-computed square sizing for both the SVG
+           and 3D stages, driven by ResizeObserver. Camera now auto-fits
+           to the model's bounding sphere instead of a fixed radius, so
+           framing adapts correctly to relief height and mode. Added
+           click/touch-drag manual orbit control alongside auto-orbit.
+  v1.2.1 — Fixed base plate floating disconnected from the pattern: the
+           rotation applied to lay extruded shapes flat maps local Y to
+           negative world Z, but the base plate was positioned in positive
+           Z, so they only touched at one shared edge instead of fully
+           overlapping.
+  v1.3.0 — Added attractor points: 1-2 seeded points (independent RNG
+           stream, decorrelated from the main pattern seed) modulate each
+           shape's 3D extrusion height via gaussian falloff — taller near
+           positive-strength attractors, shorter near negative ones. 2D
+           view shows a faint marker + influence-radius ring when active.
+  v1.3.1 — Attractor points are now draggable in the 2D view (click/touch
+           and drag a marker). Attractor state is now persistent — only
+           regenerated on a seed change, not on every refresh() — so drag
+           edits survive density/relief/mode changes and toggling the
+           attractor off and back on. Drag redraws reuse cached pattern
+           data instead of re-running the seeded generators, so dragging
+           never perturbs the underlying pattern.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIGURE / GROUND — Generative Black &amp; White Ambiguity</title>
+<style>
+  :root{
+    --ink:#0A0A0A;
+    --paper:#FAFAF9;
+    --mid:#7A7A7A;
+    --bar-h:64px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  html{
+    transition:filter 0.05s linear;
+  }
+  html.inverted{
+    filter:invert(1);
+  }
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Helvetica Neue","Arial",sans-serif;
+    height:100%;
+    overflow:hidden;
+  }
+  .app{
+    height:100%;
+    display:flex;
+    flex-direction:column;
+  }
+  .stage{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px 24px 8px;
+    position:relative;
+    min-height:0;
+  }
+  .stage svg{
+    display:block;
+    background:var(--paper);
+  }
+  .stage svg.attractor-active{
+    cursor:grab;
+  }
+  .stage svg.attractor-dragging{
+    cursor:grabbing;
+  }
+  .stage3d{
+    display:none;
+    cursor:grab;
+  }
+  .stage3d.dragging{
+    cursor:grabbing;
+  }
+  .stage3d.active{display:block;}
+  .stage3d canvas{display:block;}
+  .stage svg.hidden{display:none;}
+  .wordmark{
+    position:absolute;
+    top:28px;
+    left:32px;
+    pointer-events:none;
+    background:var(--paper);
+    padding:8px 14px;
+  }
+  .wordmark .mark{
+    font-weight:900;
+    font-size:20px;
+    letter-spacing:0.5px;
+    line-height:1;
+  }
+  .wordmark .sub{
+    font-weight:200;
+    font-size:10px;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    color:var(--mid);
+    margin-top:4px;
+  }
+
+  .bar{
+    height:var(--bar-h);
+    flex-shrink:0;
+    border-top:2px solid var(--ink);
+    display:flex;
+    align-items:center;
+    gap:22px;
+    padding:0 24px;
+    overflow-x:auto;
+  }
+  .group{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-shrink:0;
+  }
+  .group + .group{
+    border-left:1px solid rgba(10,10,10,0.15);
+    padding-left:22px;
+  }
+  .field-label{
+    font-weight:200;
+    font-size:10px;
+    letter-spacing:1.5px;
+    text-transform:uppercase;
+    color:var(--mid);
+    white-space:nowrap;
+  }
+  button{
+    font-family:"Helvetica Neue",sans-serif;
+    font-weight:700;
+    font-size:11px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    cursor:pointer;
+    border:1px solid var(--ink);
+    background:transparent;
+    color:var(--ink);
+    padding:9px 14px;
+    white-space:nowrap;
+  }
+  button:hover{background:var(--ink);color:var(--paper);}
+  button.active{background:var(--ink);color:var(--paper);}
+  button.solid{background:var(--ink);color:var(--paper);}
+  button.solid:hover{background:transparent;color:var(--ink);}
+  input[type="number"]{
+    width:64px;
+    background:transparent;
+    border:1px solid rgba(10,10,10,0.3);
+    color:var(--ink);
+    font-family:"Courier New",monospace;
+    font-size:12px;
+    padding:8px 8px;
+  }
+  input[type="range"]{
+    width:90px;
+    accent-color:var(--ink);
+  }
+  .footer-credit{
+    font-weight:200;
+    font-size:10px;
+    letter-spacing:0.5px;
+    color:var(--mid);
+    white-space:nowrap;
+    margin-left:auto;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .footer-credit a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink);}
+
+  @media (max-width:720px){
+    .wordmark{top:16px;left:16px;}
+    .bar{gap:16px;padding:0 16px;}
+    .group + .group{padding-left:16px;}
+    .footer-credit{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <div class="wordmark">
+      <div class="mark">FIGURE / GROUND</div>
+      <div class="sub">which is which</div>
+    </div>
+    <svg id="canvas" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="stage3d" id="stage3d"></div>
+  </div>
+
+  <div class="bar">
+    <div class="group">
+      <button class="active" id="modeTruchet">Truchet</button>
+      <button id="modeBlend">Blend</button>
+      <button id="modeWaves">Waves</button>
+    </div>
+
+    <div class="group">
+      <span class="field-label">Seed</span>
+      <input type="number" id="seedInput" min="1" max="999999" value="1">
+    </div>
+
+    <div class="group">
+      <span class="field-label">Density</span>
+      <input type="range" id="densitySlider" min="1" max="10" value="5">
+    </div>
+
+    <div class="group">
+      <button class="solid" id="regenBtn">Generate</button>
+      <button id="invertBtn">Invert</button>
+    </div>
+
+    <div class="group">
+      <button id="view3dBtn">3D</button>
+      <span class="field-label">Relief</span>
+      <input type="range" id="reliefSlider" min="1" max="10" value="5">
+      <button id="orbitToggle">Pause orbit</button>
+      <button id="attractorToggle">Attractor</button>
+    </div>
+
+    <div class="group">
+      <button id="downloadSvg">Save SVG</button>
+      <button id="downloadPng">Save PNG</button>
+    </div>
+
+    <div class="footer-credit">
+      Joe.K · <a href="https://axisbim.io" target="_blank" rel="noopener">axisbim.io</a> — <span id="appVersion"></span>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  const APP_VERSION = 'v1.3.1';
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById('canvas');
+  const seedInput = document.getElementById('seedInput');
+  const densitySlider = document.getElementById('densitySlider');
+  const reliefSlider = document.getElementById('reliefSlider');
+  const stage3d = document.getElementById('stage3d');
+  const stageEl = document.querySelector('.stage');
+  const modeBtns = {
+    truchet: document.getElementById('modeTruchet'),
+    blend: document.getElementById('modeBlend'),
+    waves: document.getElementById('modeWaves')
+  };
+
+  let currentMode = 'truchet';
+  let clipCounter = 0;
+  let is3D = false;
+  let orbiting = true;
+  let attractorOn = false;
+  let attractors = [];
+  let attractorSeedTrack = null;
+  let draggedAttractorIndex = -1;
+  let lastMode = 'truchet', lastData = null, lastRelief = 5;
+
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function el(tag, attrs){
+    const e = document.createElementNS(NS, tag);
+    for(const k in attrs){ e.setAttribute(k, attrs[k]); }
+    return e;
+  }
+
+  function clearSvg(){
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+  }
+
+  // ---------- DATA GENERATORS (pure, shared by 2D + 3D) ----------
+  function truchetData(seed, density){
+    const rnd = mulberry32(seed);
+    const n = 4 + density * 2;
+    const s = 1000 / n;
+    const cells = [];
+    for(let row=0; row<n; row++){
+      for(let col=0; col<n; col++){
+        cells.push({ x:col*s, y:row*s, s, orientA: rnd() > 0.5 });
+      }
+    }
+    return { cells, s, n };
+  }
+
+  function blendData(seed, density){
+    const rnd = mulberry32(seed);
+    const rand = (min,max) => min + rnd()*(max-min);
+    const pick = (arr) => arr[Math.floor(rnd()*arr.length)];
+    const count = 6 + density * 3;
+    const shapes = [];
+    for(let i=0;i<count;i++){
+      const shapeType = pick(['circle','rect']);
+      const cx = rand(0,1000), cy = rand(0,1000);
+      if(shapeType === 'circle'){
+        shapes.push({ type:'circle', cx, cy, r: rand(80,340) });
+      } else {
+        shapes.push({ type:'rect', cx, cy, w: rand(120,500), h: rand(120,500), rot: rand(0,360) });
+      }
+    }
+    return { shapes };
+  }
+
+  function wavesData(seed, density){
+    const rnd = mulberry32(seed);
+    const rand = (min,max) => min + rnd()*(max-min);
+    const stripeCount = 10 + density * 3;
+    const bandH = 1000 / stripeCount;
+    const baseFreq = rand(1.5, 4);
+    const basePhase = rand(0, Math.PI*2);
+    const stripes = [];
+    const steps = 48;
+    for(let i=0; i<stripeCount; i++){
+      if(i % 2 === 0) continue;
+      const y0 = i * bandH;
+      const amp = rand(bandH*0.3, bandH*1.4);
+      const freq = baseFreq + rand(-0.4,0.4);
+      const phase = basePhase + i*0.35;
+      let top = [], bottom = [];
+      for(let s=0; s<=steps; s++){
+        const x = (s/steps) * 1000;
+        const wobble = amp * Math.sin((x/1000)*Math.PI*2*freq + phase);
+        top.push([x, y0 + wobble]);
+        bottom.push([x, y0 + bandH + wobble]);
+      }
+      stripes.push({ top, bottom });
+    }
+    return { stripes };
+  }
+
+  // ---------- 2D SVG RENDERERS ----------
+  function renderTruchetSVG(data){
+    clearSvg();
+    svg.appendChild(el('rect', {x:0,y:0,width:1000,height:1000,fill:'#FAFAF9'}));
+    data.cells.forEach(c => {
+      svg.appendChild(el('rect', {x:c.x, y:c.y, width:c.s, height:c.s, fill:'#FAFAF9'}));
+      const clipId = 'tclip' + (clipCounter++);
+      const clip = el('clipPath', {id: clipId});
+      clip.appendChild(el('rect', {x:c.x, y:c.y, width:c.s, height:c.s}));
+      svg.appendChild(clip);
+      const g = el('g', {'clip-path': `url(#${clipId})`});
+      const r = c.s/2;
+      if(c.orientA){
+        g.appendChild(el('circle', {cx:c.x, cy:c.y, r, fill:'#0A0A0A'}));
+        g.appendChild(el('circle', {cx:c.x+c.s, cy:c.y+c.s, r, fill:'#0A0A0A'}));
+      } else {
+        g.appendChild(el('circle', {cx:c.x+c.s, cy:c.y, r, fill:'#0A0A0A'}));
+        g.appendChild(el('circle', {cx:c.x, cy:c.y+c.s, r, fill:'#0A0A0A'}));
+      }
+      svg.appendChild(g);
+    });
+    svg.appendChild(el('rect', {x:2,y:2,width:996,height:996,fill:'none',stroke:'#0A0A0A','stroke-width':4}));
+  }
+
+  function renderBlendSVG(data){
+    clearSvg();
+    svg.appendChild(el('rect', {x:0,y:0,width:1000,height:1000,fill:'#FAFAF9'}));
+    data.shapes.forEach(sh => {
+      let shape;
+      if(sh.type === 'circle'){
+        shape = el('circle', {cx:sh.cx, cy:sh.cy, r:sh.r, fill:'#0A0A0A'});
+      } else {
+        shape = el('rect', {
+          x:sh.cx-sh.w/2, y:sh.cy-sh.h/2, width:sh.w, height:sh.h, fill:'#0A0A0A',
+          transform:`rotate(${sh.rot} ${sh.cx} ${sh.cy})`
+        });
+      }
+      shape.setAttribute('style','mix-blend-mode:difference');
+      svg.appendChild(shape);
+    });
+    const frame = el('rect', {x:2,y:2,width:996,height:996,fill:'none',stroke:'#0A0A0A','stroke-width':4});
+    frame.setAttribute('style','mix-blend-mode:difference');
+    svg.appendChild(frame);
+  }
+
+  function renderWavesSVG(data){
+    clearSvg();
+    svg.appendChild(el('rect', {x:0,y:0,width:1000,height:1000,fill:'#FAFAF9'}));
+    data.stripes.forEach(st => {
+      let d = `M ${st.top[0][0]},${st.top[0][1]} `;
+      for(let s=1;s<st.top.length;s++){ d += `L ${st.top[s][0]},${st.top[s][1]} `; }
+      for(let s=st.bottom.length-1; s>=0; s--){ d += `L ${st.bottom[s][0]},${st.bottom[s][1]} `; }
+      d += 'Z';
+      svg.appendChild(el('path', {d, fill:'#0A0A0A'}));
+    });
+    svg.appendChild(el('rect', {x:2,y:2,width:996,height:996,fill:'none',stroke:'#0A0A0A','stroke-width':4}));
+  }
+
+  // ---------- ATTRACTOR ----------
+  // Independent RNG stream (decorrelated from the main pattern seed) so
+  // toggling the attractor never changes the underlying pattern itself.
+  function attractorData(seed, count){
+    const rnd = mulberry32(seed * 7919 + 13);
+    const rand = (min,max) => min + rnd()*(max-min);
+    const points = [];
+    for(let i=0;i<count;i++){
+      points.push({
+        x: rand(180, 820),
+        y: rand(180, 820),
+        radius: rand(180, 420),
+        strength: rand(-0.7, 1.7)
+      });
+    }
+    return points;
+  }
+
+  function attractorMultiplier(cx, cy, attractors){
+    if(!attractors.length) return 1;
+    let m = 1;
+    attractors.forEach(a => {
+      const d = Math.hypot(cx - a.x, cy - a.y);
+      m += a.strength * Math.exp(-(d*d) / (2*a.radius*a.radius));
+    });
+    return Math.max(0.15, m);
+  }
+
+  function renderAttractorMarkersSVG(attractors){
+    attractors.forEach(a => {
+      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:a.radius, fill:'none', stroke:'#0A0A0A', 'stroke-width':1, opacity:0.12}));
+      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:6, fill:'none', stroke:'#0A0A0A', 'stroke-width':1.5, opacity:0.35}));
+      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:1.5, fill:'#0A0A0A', opacity:0.5}));
+    });
+  }
+
+  function currentData(mode, seed, density){
+    if(mode === 'truchet') return truchetData(seed, density);
+    if(mode === 'blend') return blendData(seed, density);
+    return wavesData(seed, density);
+  }
+
+  // ---------- 3D SCENE ----------
+  let scene3, camera3, renderer3, group3, animFrame3;
+  let theta3 = 0.6, phi3 = 0.55;
+  let orbitTarget = {x:0, y:60, z:0};
+  let orbitRadius = 950;
+  let isDragging = false;
+
+  function ensure3D(){
+    if(renderer3) return;
+    if(typeof THREE === 'undefined'){
+      stage3d.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:Courier New,monospace;font-size:12px;color:#7A7A7A;text-align:center;padding:20px;">3D library failed to load — check your connection and try reloading the page.</div>';
+      return;
+    }
+    scene3 = new THREE.Scene();
+    scene3.background = new THREE.Color(0xFAFAF9);
+    camera3 = new THREE.PerspectiveCamera(38, 1, 1, 5000);
+    renderer3 = new THREE.WebGLRenderer({antialias:true});
+    renderer3.shadowMap.enabled = true;
+    stage3d.appendChild(renderer3.domElement);
+    setupDragControls();
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    scene3.add(ambient);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(400, 700, 300);
+    dir.castShadow = true;
+    dir.shadow.mapSize.set(1024,1024);
+    dir.shadow.camera.left = -700; dir.shadow.camera.right = 700;
+    dir.shadow.camera.top = 700; dir.shadow.camera.bottom = -700;
+    scene3.add(dir);
+
+    animate3();
+  }
+
+  function quarterShape(cx, cy, r, corner){
+    const shape = new THREE.Shape();
+    let a0, a1;
+    if(corner === 'tl'){ a0 = 0; a1 = Math.PI/2; }
+    else if(corner === 'tr'){ a0 = Math.PI/2; a1 = Math.PI; }
+    else if(corner === 'br'){ a0 = Math.PI; a1 = Math.PI*1.5; }
+    else { a0 = Math.PI*1.5; a1 = Math.PI*2; }
+    shape.moveTo(cx, cy);
+    shape.absarc(cx, cy, r, a0, a1, false);
+    shape.lineTo(cx, cy);
+    return shape;
+  }
+
+  function rectShape(cx, cy, w, h, rotDeg){
+    const rot = rotDeg * Math.PI/180;
+    const pts = [[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]].map(([dx,dy]) => {
+      const rx = dx*Math.cos(rot) - dy*Math.sin(rot);
+      const ry = dx*Math.sin(rot) + dy*Math.cos(rot);
+      return [cx+rx, cy+ry];
+    });
+    const shape = new THREE.Shape();
+    shape.moveTo(pts[0][0], pts[0][1]);
+    for(let i=1;i<pts.length;i++) shape.lineTo(pts[i][0], pts[i][1]);
+    shape.lineTo(pts[0][0], pts[0][1]);
+    return shape;
+  }
+
+  function extrudeMesh(shape, depth, material, baseY){
+    const geo = new THREE.ExtrudeGeometry(shape, {depth, bevelEnabled:false});
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.rotation.x = -Math.PI/2;
+    mesh.position.y = baseY;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function buildScene3D(mode, data, relief, attractors){
+    ensure3D();
+    if(!renderer3) return;
+    if(group3) scene3.remove(group3);
+    group3 = new THREE.Group();
+
+    const inkMat = new THREE.MeshStandardMaterial({color:0x0A0A0A, roughness:0.65});
+    const paperMat = new THREE.MeshStandardMaterial({color:0xFAFAF9, roughness:0.85});
+
+    const baseThickness = 30;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1000, baseThickness, 1000), paperMat);
+    base.position.set(500, -baseThickness/2, -500);
+    base.receiveShadow = true;
+    group3.add(base);
+
+    const H = 20 + relief * 14;
+    const attr = attractors || [];
+
+    if(mode === 'truchet'){
+      data.cells.forEach(c => {
+        const r = c.s/2;
+        const cellCx = c.x + c.s/2, cellCy = c.y + c.s/2;
+        const shapeH = H * attractorMultiplier(cellCx, cellCy, attr);
+        const corners = c.orientA ? ['tl','br'] : ['tr','bl'];
+        corners.forEach(corner => {
+          let cx, cy;
+          if(corner === 'tl'){ cx=c.x; cy=c.y; }
+          else if(corner === 'tr'){ cx=c.x+c.s; cy=c.y; }
+          else if(corner === 'br'){ cx=c.x+c.s; cy=c.y+c.s; }
+          else { cx=c.x; cy=c.y+c.s; }
+          const shape = quarterShape(cx, cy, r, corner);
+          group3.add(extrudeMesh(shape, shapeH, inkMat, 0));
+        });
+      });
+    } else if(mode === 'blend'){
+      const layerH = H / Math.max(1,data.shapes.length) * 3.2;
+      data.shapes.forEach((sh, i) => {
+        let shape;
+        const shapeLayerH = layerH * attractorMultiplier(sh.cx, sh.cy, attr);
+        if(sh.type === 'circle'){
+          shape = new THREE.Shape();
+          shape.absarc(sh.cx, sh.cy, sh.r, 0, Math.PI*2, false);
+        } else {
+          shape = rectShape(sh.cx, sh.cy, sh.w, sh.h, sh.rot);
+        }
+        group3.add(extrudeMesh(shape, shapeLayerH, inkMat, i*layerH*0.4));
+      });
+    } else {
+      data.stripes.forEach(st => {
+        const mid = st.top[Math.floor(st.top.length/2)];
+        const shapeH = H * attractorMultiplier(mid[0], mid[1], attr);
+        const shape = new THREE.Shape();
+        shape.moveTo(st.top[0][0], st.top[0][1]);
+        for(let s=1;s<st.top.length;s++) shape.lineTo(st.top[s][0], st.top[s][1]);
+        for(let s=st.bottom.length-1; s>=0; s--) shape.lineTo(st.bottom[s][0], st.bottom[s][1]);
+        shape.lineTo(st.top[0][0], st.top[0][1]);
+        group3.add(extrudeMesh(shape, shapeH, inkMat, 0));
+      });
+    }
+
+    group3.position.set(-500, 0, -500);
+    scene3.add(group3);
+
+    const box = new THREE.Box3().setFromObject(group3);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    orbitTarget = sphere.center.clone();
+    const fovRad = camera3.fov * Math.PI / 180;
+    orbitRadius = (sphere.radius / Math.sin(fovRad/2)) * 1.25;
+  }
+
+  function applySquareSize(){
+    const rect = stageEl.getBoundingClientRect();
+    const cs = getComputedStyle(stageEl);
+    const padH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const availW = rect.width - padH;
+    const availH = rect.height - padV;
+    const size = Math.max(80, Math.floor(Math.min(availW, availH)));
+    svg.style.width = size + 'px';
+    svg.style.height = size + 'px';
+    stage3d.style.width = size + 'px';
+    stage3d.style.height = size + 'px';
+    if(renderer3){
+      renderer3.setSize(size, size);
+      camera3.aspect = 1;
+      camera3.updateProjectionMatrix();
+    }
+  }
+
+  function setupDragControls(){
+    let lastX = 0, lastY = 0;
+    const onDown = (e) => {
+      isDragging = true;
+      stage3d.classList.add('dragging');
+      const p = e.touches ? e.touches[0] : e;
+      lastX = p.clientX; lastY = p.clientY;
+    };
+    const onMove = (e) => {
+      if(!isDragging) return;
+      const p = e.touches ? e.touches[0] : e;
+      const dx = p.clientX - lastX, dy = p.clientY - lastY;
+      lastX = p.clientX; lastY = p.clientY;
+      theta3 -= dx * 0.006;
+      phi3 = Math.max(-1.3, Math.min(1.3, phi3 + dy * 0.006));
+    };
+    const onUp = () => {
+      isDragging = false;
+      stage3d.classList.remove('dragging');
+    };
+    stage3d.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    stage3d.addEventListener('touchstart', onDown, {passive:true});
+    stage3d.addEventListener('touchmove', onMove, {passive:true});
+    stage3d.addEventListener('touchend', onUp);
+  }
+
+  function animate3(){
+    animFrame3 = requestAnimationFrame(animate3);
+    if(orbiting && !isDragging) theta3 += 0.0035;
+    camera3.position.x = orbitTarget.x + orbitRadius * Math.cos(theta3) * Math.cos(phi3);
+    camera3.position.z = orbitTarget.z + orbitRadius * Math.sin(theta3) * Math.cos(phi3);
+    camera3.position.y = orbitTarget.y + orbitRadius * Math.sin(phi3);
+    camera3.lookAt(orbitTarget.x, orbitTarget.y, orbitTarget.z);
+    renderer3.render(scene3, camera3);
+  }
+
+  function refresh(){
+    const seed = parseInt(seedInput.value) || 1;
+    const density = parseInt(densitySlider.value);
+    const relief = parseInt(reliefSlider.value);
+    const data = currentData(currentMode, seed, density);
+
+    if(attractorOn){
+      if(attractorSeedTrack !== seed || attractors.length === 0){
+        attractors = attractorData(seed, 2);
+        attractorSeedTrack = seed;
+      }
+    } else {
+      attractors = [];
+    }
+
+    if(currentMode === 'truchet') renderTruchetSVG(data);
+    else if(currentMode === 'blend') renderBlendSVG(data);
+    else renderWavesSVG(data);
+    if(attractorOn) renderAttractorMarkersSVG(attractors);
+
+    lastMode = currentMode; lastData = data; lastRelief = relief;
+
+    if(is3D){ buildScene3D(currentMode, data, relief, attractors); applySquareSize(); }
+  }
+
+  // Lightweight redraw used while dragging an attractor marker — reuses the
+  // already-generated pattern data instead of re-running the (seeded, RNG-
+  // consuming) data generators, so dragging doesn't perturb the pattern.
+  function refreshAfterAttractorDrag(){
+    if(currentMode === 'truchet') renderTruchetSVG(lastData);
+    else if(currentMode === 'blend') renderBlendSVG(lastData);
+    else renderWavesSVG(lastData);
+    renderAttractorMarkersSVG(attractors);
+    if(is3D){ buildScene3D(lastMode, lastData, lastRelief, attractors); }
+  }
+
+  function setMode(mode){
+    currentMode = mode;
+    Object.keys(modeBtns).forEach(k => modeBtns[k].classList.toggle('active', k === mode));
+    refresh();
+  }
+
+  modeBtns.truchet.addEventListener('click', () => setMode('truchet'));
+  modeBtns.blend.addEventListener('click', () => setMode('blend'));
+  modeBtns.waves.addEventListener('click', () => setMode('waves'));
+
+  document.getElementById('regenBtn').addEventListener('click', () => {
+    seedInput.value = Math.floor(Math.random()*99999) + 1;
+    refresh();
+  });
+  seedInput.addEventListener('input', refresh);
+  densitySlider.addEventListener('input', refresh);
+  reliefSlider.addEventListener('input', refresh);
+
+  document.getElementById('view3dBtn').addEventListener('click', () => {
+    is3D = !is3D;
+    document.getElementById('view3dBtn').classList.toggle('active', is3D);
+    svg.classList.toggle('hidden', is3D);
+    stage3d.classList.toggle('active', is3D);
+    applySquareSize();
+    if(is3D) refresh();
+  });
+
+  document.getElementById('orbitToggle').addEventListener('click', (e) => {
+    orbiting = !orbiting;
+    e.target.textContent = orbiting ? 'Pause orbit' : 'Resume orbit';
+  });
+
+  document.getElementById('attractorToggle').addEventListener('click', (e) => {
+    attractorOn = !attractorOn;
+    e.target.classList.toggle('active', attractorOn);
+    svg.classList.toggle('attractor-active', attractorOn);
+    refresh();
+  });
+
+  function clientToSvgPoint(evt){
+    const pt = svg.createSVGPoint();
+    const p = evt.touches ? evt.touches[0] : evt;
+    pt.x = p.clientX; pt.y = p.clientY;
+    const ctm = svg.getScreenCTM();
+    if(!ctm) return {x:0, y:0};
+    const svgP = pt.matrixTransform(ctm.inverse());
+    return {x:svgP.x, y:svgP.y};
+  }
+
+  function attractorPointerDown(e){
+    if(!attractorOn || attractors.length === 0) return;
+    const p = clientToSvgPoint(e);
+    let closestIdx = -1, closestDist = Infinity;
+    attractors.forEach((a, i) => {
+      const d = Math.hypot(p.x - a.x, p.y - a.y);
+      if(d < closestDist){ closestDist = d; closestIdx = i; }
+    });
+    if(closestDist < 45){
+      draggedAttractorIndex = closestIdx;
+      svg.classList.add('attractor-dragging');
+      e.preventDefault();
+    }
+  }
+
+  function attractorPointerMove(e){
+    if(draggedAttractorIndex < 0) return;
+    const p = clientToSvgPoint(e);
+    const a = attractors[draggedAttractorIndex];
+    a.x = Math.max(0, Math.min(1000, p.x));
+    a.y = Math.max(0, Math.min(1000, p.y));
+    refreshAfterAttractorDrag();
+  }
+
+  function attractorPointerUp(){
+    draggedAttractorIndex = -1;
+    svg.classList.remove('attractor-dragging');
+  }
+
+  svg.addEventListener('pointerdown', attractorPointerDown);
+  window.addEventListener('pointermove', attractorPointerMove);
+  window.addEventListener('pointerup', attractorPointerUp);
+  svg.addEventListener('touchstart', attractorPointerDown, {passive:false});
+  svg.addEventListener('touchmove', attractorPointerMove, {passive:false});
+  svg.addEventListener('touchend', attractorPointerUp);
+
+  window.addEventListener('resize', applySquareSize);
+  if(typeof ResizeObserver !== 'undefined'){
+    new ResizeObserver(() => applySquareSize()).observe(stageEl);
+  }
+
+  document.getElementById('invertBtn').addEventListener('click', () => {
+    document.documentElement.classList.toggle('inverted');
+  });
+
+  document.getElementById('downloadSvg').addEventListener('click', () => {
+    const serializer = new XMLSerializer();
+    const src = serializer.serializeToString(svg);
+    const blob = new Blob([src], {type:'image/svg+xml'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `figure-ground-${seedInput.value}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('downloadPng').addEventListener('click', () => {
+    const serializer = new XMLSerializer();
+    const src = serializer.serializeToString(svg);
+    const img = new Image();
+    const svgBlob = new Blob([src], {type:'image/svg+xml;charset=utf-8'});
+    const url = URL.createObjectURL(svgBlob);
+    img.onload = function(){
+      const canvas = document.createElement('canvas');
+      canvas.width = 2000; canvas.height = 2000;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 2000, 2000);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(function(blob){
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `figure-ground-${seedInput.value}.png`;
+        a.click();
+      });
+    };
+    img.src = url;
+  });
+
+  // keyboard shortcut: space to regenerate
+  document.addEventListener('keydown', (e) => {
+    if(e.code === 'Space' && e.target === document.body){
+      e.preventDefault();
+      seedInput.value = Math.floor(Math.random()*99999) + 1;
+      refresh();
+    }
+  });
+
+  // init
+  document.getElementById('appVersion').textContent = APP_VERSION;
+  seedInput.value = Math.floor(Math.random()*99999) + 1;
+  applySquareSize();
+  refresh();
+})();
+</script>
+</body>
+</html>
