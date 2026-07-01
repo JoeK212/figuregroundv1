@@ -37,6 +37,42 @@
            attractor off and back on. Drag redraws reuse cached pattern
            data instead of re-running the seeded generators, so dragging
            never perturbs the underlying pattern.
+  v1.4.0 — Added zoom to the 3D view: scroll-wheel dolly on desktop,
+           two-finger pinch on touch. Implemented as a clamped multiplier
+           (0.4x-2.5x) applied on top of the bounding-sphere-derived
+           orbitRadius at render time, so camera framing still comes from
+           the model's actual size, not a hardcoded distance. Single-finger
+           touch-drag now calls preventDefault() during rotation so it no
+           longer fights page scroll on mobile.
+  v1.5.0 — Tuned relief slider behavior for Truchet and Waves: extrusion
+           height is now proportional to each shape's own local footprint
+           (cell size / stripe band height) via reliefScale(relief),
+           instead of a flat global height shared across every density.
+           At high density the old flat height produced needle-like spikes
+           many times taller than their own footprint; height-to-footprint
+           ratio is now consistent across the whole density range. Blend
+           mode's stacked-layer height already normalized against shape
+           count and needed no change.
+  v1.6.0 — Mobile footer credit/version no longer disappears below 720px:
+           added a dedicated .footer-credit-mobile row below the control
+           bar (not inside its horizontally-scrolling area, so it's never
+           scrolled out of view) instead of hiding the credit entirely.
+           Attractor is now tunable: Count (1-4), Strength (0.25x-2x), and
+           Falloff (0.5x-2x radius) sliders, shown only while Attractor is
+           toggled on. Strength/Falloff apply as multipliers at render time
+           via effectiveAttractors() rather than mutating the seeded
+           attractor points, so dragging and seed/count persistence are
+           unaffected; Count changes regenerate attractors the same way a
+           seed change does.
+  v1.6.1 — Fixed washed-out black/white contrast in the 3D view: inkMat and
+           paperMat now set metalness:0 explicitly. Three.js r128's
+           MeshStandardMaterial defaults metalness to 0.5 when unset, which
+           gave even the near-black ink material a strong Fresnel-driven
+           specular response under the overhead light, making top faces
+           read as light gray/near-white instead of black — hard to tell
+           figure from ground in 3D regardless of relief height. Both
+           materials are matte, fully non-metallic surfaces, so this is
+           also just the physically correct value.
 -->
 <html lang="en">
 <head>
@@ -142,6 +178,8 @@
     border-left:1px solid rgba(10,10,10,0.15);
     padding-left:22px;
   }
+  #attractorControlsGroup{display:none;}
+  #attractorControlsGroup.active{display:flex;}
   .field-label{
     font-weight:200;
     font-size:10px;
@@ -192,12 +230,27 @@
     gap:6px;
   }
   .footer-credit a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink);}
+  .footer-credit-mobile{
+    display:none;
+    flex-shrink:0;
+    font-weight:200;
+    font-size:10px;
+    letter-spacing:0.5px;
+    color:var(--mid);
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    padding:8px 16px;
+    border-top:1px solid rgba(10,10,10,0.15);
+  }
+  .footer-credit-mobile a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink);}
 
   @media (max-width:720px){
     .wordmark{top:16px;left:16px;}
     .bar{gap:16px;padding:0 16px;}
     .group + .group{padding-left:16px;}
     .footer-credit{display:none;}
+    .footer-credit-mobile{display:flex;}
   }
 </style>
 </head>
@@ -242,6 +295,15 @@
       <button id="attractorToggle">Attractor</button>
     </div>
 
+    <div class="group" id="attractorControlsGroup">
+      <span class="field-label">Count</span>
+      <input type="range" id="attractorCountSlider" min="1" max="4" value="2">
+      <span class="field-label">Strength</span>
+      <input type="range" id="attractorStrengthSlider" min="25" max="200" value="100">
+      <span class="field-label">Falloff</span>
+      <input type="range" id="attractorFalloffSlider" min="50" max="200" value="100">
+    </div>
+
     <div class="group">
       <button id="downloadSvg">Save SVG</button>
       <button id="downloadPng">Save PNG</button>
@@ -251,17 +313,25 @@
       Joe.K · <a href="https://axisbim.io" target="_blank" rel="noopener">axisbim.io</a> — <span id="appVersion"></span>
     </div>
   </div>
+
+  <div class="footer-credit-mobile">
+    Joe.K · <a href="https://axisbim.io" target="_blank" rel="noopener">axisbim.io</a> — <span id="appVersionMobile"></span>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
-  const APP_VERSION = 'v1.3.1';
+  const APP_VERSION = 'v1.6.1';
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.getElementById('canvas');
   const seedInput = document.getElementById('seedInput');
   const densitySlider = document.getElementById('densitySlider');
   const reliefSlider = document.getElementById('reliefSlider');
+  const attractorCountSlider = document.getElementById('attractorCountSlider');
+  const attractorStrengthSlider = document.getElementById('attractorStrengthSlider');
+  const attractorFalloffSlider = document.getElementById('attractorFalloffSlider');
+  const attractorControlsGroup = document.getElementById('attractorControlsGroup');
   const stage3d = document.getElementById('stage3d');
   const stageEl = document.querySelector('.stage');
   const modeBtns = {
@@ -277,6 +347,7 @@
   let attractorOn = false;
   let attractors = [];
   let attractorSeedTrack = null;
+  let attractorCountTrack = null;
   let draggedAttractorIndex = -1;
   let lastMode = 'truchet', lastData = null, lastRelief = 5;
 
@@ -355,7 +426,7 @@
       }
       stripes.push({ top, bottom });
     }
-    return { stripes };
+    return { stripes, bandH };
   }
 
   // ---------- 2D SVG RENDERERS ----------
@@ -444,6 +515,19 @@
     return Math.max(0.15, m);
   }
 
+  // Strength/Falloff sliders scale the seeded attractor points at use time
+  // rather than mutating attractorData()'s output — this keeps the raw
+  // `attractors` array (positions, seeded radius/strength) stable for the
+  // seed/count persistence checks in refresh(), and means dragging a
+  // marker still starts from its true seeded position even after the
+  // sliders have been tuned away from their 1x defaults.
+  function effectiveAttractors(){
+    if(!attractors.length) return [];
+    const sMult = parseInt(attractorStrengthSlider.value) / 100;
+    const fMult = parseInt(attractorFalloffSlider.value) / 100;
+    return attractors.map(a => ({ x:a.x, y:a.y, strength:a.strength*sMult, radius:a.radius*fMult }));
+  }
+
   function renderAttractorMarkersSVG(attractors){
     attractors.forEach(a => {
       svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:a.radius, fill:'none', stroke:'#0A0A0A', 'stroke-width':1, opacity:0.12}));
@@ -464,6 +548,11 @@
   let orbitTarget = {x:0, y:60, z:0};
   let orbitRadius = 950;
   let isDragging = false;
+  // Zoom is a multiplier applied on top of the bounding-sphere-derived
+  // orbitRadius, never a replacement for it — buildScene3D() still owns
+  // the base framing calculation per the camera-radius invariant.
+  const MIN_ZOOM = 0.4, MAX_ZOOM = 2.5;
+  let zoomFactor = 1;
 
   function ensure3D(){
     if(renderer3) return;
@@ -529,14 +618,39 @@
     return mesh;
   }
 
+  // Truchet and Waves extrude each shape at a height derived from that
+  // shape's own local footprint (cell size / stripe band height) rather
+  // than a flat global constant. A flat constant meant relief=10 at high
+  // density (small cells/thin stripes) produced needle-like spikes many
+  // times taller than their own footprint, since footprint shrinks with
+  // density but the old height didn't. Scaling by footprint keeps the
+  // height-to-footprint ratio — and so the relief slider's visual effect —
+  // consistent across the whole density range. relief=1 -> ~0.42x
+  // footprint (subtle), relief=10 -> ~1.68x footprint (dramatic peak).
+  // Blend mode is unaffected: its layered-stack height already normalizes
+  // against shape count rather than a single shared H, so it doesn't
+  // exhibit the same spike problem at extremes.
+  function reliefScale(relief){
+    return 0.28 + relief * 0.14;
+  }
+
   function buildScene3D(mode, data, relief, attractors){
     ensure3D();
     if(!renderer3) return;
     if(group3) scene3.remove(group3);
     group3 = new THREE.Group();
 
-    const inkMat = new THREE.MeshStandardMaterial({color:0x0A0A0A, roughness:0.65});
-    const paperMat = new THREE.MeshStandardMaterial({color:0xFAFAF9, roughness:0.85});
+    // metalness is set explicitly to 0 on both materials. Three.js r128's
+    // MeshStandardMaterial defaults metalness to 0.5 when unset, which
+    // gives even a near-black albedo (0x0A0A0A) a strong Fresnel-driven
+    // specular response under the overhead directional light — the ink
+    // shapes' top faces were catching enough of that reflection to read
+    // as light gray/near-white instead of black, which is exactly what
+    // made black/white hard to tell apart in the 3D view even at low
+    // relief. Both "ink" and "paper" are matte, fully non-metallic
+    // surfaces, so metalness:0 is also just the physically correct value.
+    const inkMat = new THREE.MeshStandardMaterial({color:0x0A0A0A, roughness:0.65, metalness:0});
+    const paperMat = new THREE.MeshStandardMaterial({color:0xFAFAF9, roughness:0.85, metalness:0});
 
     const baseThickness = 30;
     const base = new THREE.Mesh(new THREE.BoxGeometry(1000, baseThickness, 1000), paperMat);
@@ -551,7 +665,7 @@
       data.cells.forEach(c => {
         const r = c.s/2;
         const cellCx = c.x + c.s/2, cellCy = c.y + c.s/2;
-        const shapeH = H * attractorMultiplier(cellCx, cellCy, attr);
+        const shapeH = c.s * reliefScale(relief) * attractorMultiplier(cellCx, cellCy, attr);
         const corners = c.orientA ? ['tl','br'] : ['tr','bl'];
         corners.forEach(corner => {
           let cx, cy;
@@ -577,9 +691,10 @@
         group3.add(extrudeMesh(shape, shapeLayerH, inkMat, i*layerH*0.4));
       });
     } else {
+      const bandH = data.bandH;
       data.stripes.forEach(st => {
         const mid = st.top[Math.floor(st.top.length/2)];
-        const shapeH = H * attractorMultiplier(mid[0], mid[1], attr);
+        const shapeH = bandH * reliefScale(relief) * attractorMultiplier(mid[0], mid[1], attr);
         const shape = new THREE.Shape();
         shape.moveTo(st.top[0][0], st.top[0][1]);
         for(let s=1;s<st.top.length;s++) shape.lineTo(st.top[s][0], st.top[s][1]);
@@ -620,6 +735,14 @@
 
   function setupDragControls(){
     let lastX = 0, lastY = 0;
+    let pinchStartDist = null, pinchStartZoom = 1;
+
+    const touchDist = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx*dx + dy*dy);
+    };
+
     const onDown = (e) => {
       isDragging = true;
       stage3d.classList.add('dragging');
@@ -638,20 +761,51 @@
       isDragging = false;
       stage3d.classList.remove('dragging');
     };
+    const onWheel = (e) => {
+      e.preventDefault();
+      zoomFactor = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomFactor + e.deltaY * 0.0015));
+    };
+    const onTouchStart = (e) => {
+      if(e.touches.length === 2){
+        isDragging = false;
+        stage3d.classList.remove('dragging');
+        pinchStartDist = touchDist(e.touches);
+        pinchStartZoom = zoomFactor;
+      } else {
+        pinchStartDist = null;
+        onDown(e);
+      }
+    };
+    const onTouchMove = (e) => {
+      if(e.touches.length === 2 && pinchStartDist){
+        e.preventDefault();
+        const d = touchDist(e.touches);
+        zoomFactor = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoom * (pinchStartDist / d)));
+      } else if(e.touches.length === 1){
+        e.preventDefault();
+        onMove(e);
+      }
+    };
+    const onTouchEnd = (e) => {
+      if(e.touches.length < 2) pinchStartDist = null;
+      onUp();
+    };
     stage3d.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    stage3d.addEventListener('touchstart', onDown, {passive:true});
-    stage3d.addEventListener('touchmove', onMove, {passive:true});
-    stage3d.addEventListener('touchend', onUp);
+    stage3d.addEventListener('touchstart', onTouchStart, {passive:true});
+    stage3d.addEventListener('touchmove', onTouchMove, {passive:false});
+    stage3d.addEventListener('touchend', onTouchEnd);
+    stage3d.addEventListener('wheel', onWheel, {passive:false});
   }
 
   function animate3(){
     animFrame3 = requestAnimationFrame(animate3);
     if(orbiting && !isDragging) theta3 += 0.0035;
-    camera3.position.x = orbitTarget.x + orbitRadius * Math.cos(theta3) * Math.cos(phi3);
-    camera3.position.z = orbitTarget.z + orbitRadius * Math.sin(theta3) * Math.cos(phi3);
-    camera3.position.y = orbitTarget.y + orbitRadius * Math.sin(phi3);
+    const effRadius = orbitRadius * zoomFactor;
+    camera3.position.x = orbitTarget.x + effRadius * Math.cos(theta3) * Math.cos(phi3);
+    camera3.position.z = orbitTarget.z + effRadius * Math.sin(theta3) * Math.cos(phi3);
+    camera3.position.y = orbitTarget.y + effRadius * Math.sin(phi3);
     camera3.lookAt(orbitTarget.x, orbitTarget.y, orbitTarget.z);
     renderer3.render(scene3, camera3);
   }
@@ -663,9 +817,11 @@
     const data = currentData(currentMode, seed, density);
 
     if(attractorOn){
-      if(attractorSeedTrack !== seed || attractors.length === 0){
-        attractors = attractorData(seed, 2);
+      const count = parseInt(attractorCountSlider.value);
+      if(attractorSeedTrack !== seed || attractorCountTrack !== count || attractors.length === 0){
+        attractors = attractorData(seed, count);
         attractorSeedTrack = seed;
+        attractorCountTrack = count;
       }
     } else {
       attractors = [];
@@ -674,22 +830,24 @@
     if(currentMode === 'truchet') renderTruchetSVG(data);
     else if(currentMode === 'blend') renderBlendSVG(data);
     else renderWavesSVG(data);
-    if(attractorOn) renderAttractorMarkersSVG(attractors);
+    if(attractorOn) renderAttractorMarkersSVG(effectiveAttractors());
 
     lastMode = currentMode; lastData = data; lastRelief = relief;
 
-    if(is3D){ buildScene3D(currentMode, data, relief, attractors); applySquareSize(); }
+    if(is3D){ buildScene3D(currentMode, data, relief, effectiveAttractors()); applySquareSize(); }
   }
 
-  // Lightweight redraw used while dragging an attractor marker — reuses the
-  // already-generated pattern data instead of re-running the (seeded, RNG-
-  // consuming) data generators, so dragging doesn't perturb the pattern.
+  // Lightweight redraw used while dragging an attractor marker, or when the
+  // Strength/Falloff sliders change — reuses the already-generated pattern
+  // data instead of re-running the (seeded, RNG-consuming) data generators,
+  // so neither dragging a marker nor tuning strength/falloff ever perturbs
+  // the underlying pattern.
   function refreshAfterAttractorDrag(){
     if(currentMode === 'truchet') renderTruchetSVG(lastData);
     else if(currentMode === 'blend') renderBlendSVG(lastData);
     else renderWavesSVG(lastData);
-    renderAttractorMarkersSVG(attractors);
-    if(is3D){ buildScene3D(lastMode, lastData, lastRelief, attractors); }
+    renderAttractorMarkersSVG(effectiveAttractors());
+    if(is3D){ buildScene3D(lastMode, lastData, lastRelief, effectiveAttractors()); }
   }
 
   function setMode(mode){
@@ -728,8 +886,13 @@
     attractorOn = !attractorOn;
     e.target.classList.toggle('active', attractorOn);
     svg.classList.toggle('attractor-active', attractorOn);
+    attractorControlsGroup.classList.toggle('active', attractorOn);
     refresh();
   });
+
+  attractorCountSlider.addEventListener('input', refresh);
+  attractorStrengthSlider.addEventListener('input', refreshAfterAttractorDrag);
+  attractorFalloffSlider.addEventListener('input', refreshAfterAttractorDrag);
 
   function clientToSvgPoint(evt){
     const pt = svg.createSVGPoint();
@@ -831,6 +994,7 @@
 
   // init
   document.getElementById('appVersion').textContent = APP_VERSION;
+  document.getElementById('appVersionMobile').textContent = APP_VERSION;
   seedInput.value = Math.floor(Math.random()*99999) + 1;
   applySquareSize();
   refresh();

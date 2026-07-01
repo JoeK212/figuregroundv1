@@ -1,0 +1,33 @@
+# FIGURE / GROUND — netlify.toml
+# Single-file static site, no build step. Deployed via Netlify continuous
+# deployment from `main` on JoeK212/figuregroundv1.
+
+[build]
+  publish = "."
+  # No [build.command] — there's nothing to compile. index.html is served
+  # as-is. Leaving this unset (rather than e.g. "echo skip") keeps Netlify
+  # from spinning up a full build environment for a plain static file,
+  # which matters for build-minute usage across Joe's Netlify account.
+
+[build.processing]
+  skip_processing = false
+
+[build.processing.html]
+  pretty_urls = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    # index.html is the entire app — never let a CDN/browser cache a stale
+    # copy after a deploy. audit_deploy.js and HANDOFF_*.md aren't served
+    # (they're dev-only files, not referenced by index.html), so no
+    # separate cache rule is needed for them.
+    Cache-Control = "public, max-age=0, must-revalidate"
