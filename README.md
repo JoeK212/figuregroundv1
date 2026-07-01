@@ -3,6 +3,9 @@
 Generative black & white ambiguity tool. Single-file HTML/JS, no build step.
 Joe.K · axisbim.io
 
+**Live:** [blackwhitefigurestudies.netlify.app](https://blackwhitefigurestudies.netlify.app)
+**Repo:** [github.com/JoeK212/figuregroundv1](https://github.com/JoeK212/figuregroundv1)
+
 ## Files this version produces
 - `index.html` — the site
 - `audit_deploy.js` — static QA pass, 85 checks, run with `node audit_deploy.js`
