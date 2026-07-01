@@ -98,6 +98,23 @@
            grid sized to the shape count, with jitter within each cell,
            spreading shapes across the full canvas while keeping
            placement randomized.
+  v1.7.2 — Plan view no longer offers 3D interactions it can't actually
+           perform: drag-rotate is a no-op in Plan (animate3()'s ortho
+           branch derives camera position from orbitTarget every frame,
+           ignoring theta3/phi3 entirely), so drag is now disabled and the
+           grab cursor suppressed while Plan is active. "Pause orbit" is
+           disabled the same way, with its tooltip explaining why, since
+           auto-orbit was already a no-op in Plan. Zoom (wheel + pinch)
+           remains active in Plan, since it correctly scales the
+           orthographic frustum the same direction it scales perspective
+           distance elsewhere. Fixed 3D/Plan button state: both buttons
+           could read as active simultaneously, implying two camera modes
+           were live at once, when only one ever is — view3dBtn's active
+           state is now is3D && !is3DPlanView instead of just is3D, via a
+           shared updateViewButtons() helper, so only one of the two is
+           ever lit. Added title-attribute tooltips across the control
+           bar, with extra detail on the 3D-specific controls (3D stage
+           canvas, Pause orbit, Attractor tuning).
 -->
 <html lang="en">
 <head>
@@ -162,6 +179,9 @@
   }
   .stage3d.dragging{
     cursor:grabbing;
+  }
+  .stage3d.plan-locked{
+    cursor:default;
   }
   .stage3d.active{display:block;}
   .stage3d canvas{display:block;}
@@ -243,6 +263,8 @@
   button.active{background:var(--ink);color:var(--paper);}
   button.solid{background:var(--ink);color:var(--paper);}
   button.solid:hover{background:transparent;color:var(--ink);}
+  button:disabled{opacity:0.35;cursor:not-allowed;}
+  button:disabled:hover{background:transparent;color:var(--ink);}
   input[type="number"]{
     width:64px;
     background:transparent;
@@ -300,55 +322,55 @@
       <div class="sub">which is which</div>
     </div>
     <svg id="canvas" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="stage3d" id="stage3d"></div>
+    <div class="stage3d" id="stage3d" title="Drag to rotate · scroll or pinch to zoom"></div>
   </div>
 
   <div class="bar">
     <div class="bar-row">
       <div class="group">
-        <button class="active" id="modeTruchet">Truchet</button>
-        <button id="modeBlend">Blend</button>
-        <button id="modeWaves">Waves</button>
+        <button class="active" id="modeTruchet" title="Interlocking quarter-circle tile pattern">Truchet</button>
+        <button id="modeBlend" title="Overlapping shapes combined with mix-blend-mode:difference">Blend</button>
+        <button id="modeWaves" title="Horizontal stripe/band pattern">Waves</button>
       </div>
 
       <div class="group">
         <span class="field-label">Seed</span>
-        <input type="number" id="seedInput" min="1" max="999999" value="1">
+        <input type="number" id="seedInput" min="1" max="999999" value="1" title="Random seed — same seed always generates the same pattern">
       </div>
 
       <div class="group">
         <span class="field-label">Density</span>
-        <input type="range" id="densitySlider" min="1" max="10" value="5">
+        <input type="range" id="densitySlider" min="1" max="10" value="5" title="Shape count / pattern density">
       </div>
 
       <div class="group">
-        <button class="solid" id="regenBtn">Generate</button>
-        <button id="invertBtn">Invert</button>
+        <button class="solid" id="regenBtn" title="Generate a new random seed">Generate</button>
+        <button id="invertBtn" title="Flip the whole page black/white — is the black the figure, or is the white?">Invert</button>
       </div>
 
       <div class="group">
-        <button id="downloadSvg">Save SVG</button>
-        <button id="downloadPng">Save PNG</button>
+        <button id="downloadSvg" title="Export the current 2D pattern as an SVG file">Save SVG</button>
+        <button id="downloadPng" title="Export the current 2D pattern as a PNG image">Save PNG</button>
       </div>
     </div>
 
     <div class="bar-row">
       <div class="group">
-        <button id="view3dBtn">3D</button>
+        <button id="view3dBtn" title="Switch to the extruded 3D relief view — drag to rotate, scroll or pinch to zoom">3D</button>
         <button id="planViewBtn" title="Snap to a top-down orthographic view of the 3D relief">Plan</button>
         <span class="field-label">Relief</span>
-        <input type="range" id="reliefSlider" min="1" max="10" value="5">
-        <button id="orbitToggle">Pause orbit</button>
-        <button id="attractorToggle">Attractor</button>
+        <input type="range" id="reliefSlider" min="1" max="10" value="5" title="3D extrusion height">
+        <button id="orbitToggle" title="Pause or resume the automatic camera orbit in 3D view">Pause orbit</button>
+        <button id="attractorToggle" title="Toggle seeded points that pull nearby shapes taller or shorter in 3D — draggable in the 2D view">Attractor</button>
       </div>
 
       <div class="group" id="attractorControlsGroup">
         <span class="field-label">Count</span>
-        <input type="range" id="attractorCountSlider" min="1" max="4" value="2">
+        <input type="range" id="attractorCountSlider" min="1" max="4" value="2" title="Number of attractor points">
         <span class="field-label">Strength</span>
-        <input type="range" id="attractorStrengthSlider" min="25" max="200" value="100">
+        <input type="range" id="attractorStrengthSlider" min="25" max="200" value="100" title="How much attractors pull shape height up or down">
         <span class="field-label">Falloff</span>
-        <input type="range" id="attractorFalloffSlider" min="50" max="200" value="100">
+        <input type="range" id="attractorFalloffSlider" min="50" max="200" value="100" title="Radius of each attractor's influence">
       </div>
 
       <div class="footer-credit">
@@ -365,7 +387,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
-  const APP_VERSION = 'v1.7.1';
+  const APP_VERSION = 'v1.7.2';
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.getElementById('canvas');
   const seedInput = document.getElementById('seedInput');
@@ -815,6 +837,11 @@
     };
 
     const onDown = (e) => {
+      // Plan view's camera is fully derived from orbitTarget every frame
+      // (see animate3()'s is3DPlanView branch) — theta3/phi3 are ignored,
+      // so drag-rotate has zero visible effect while Plan is active. Bail
+      // out entirely rather than let it silently no-op with a grab cursor.
+      if(is3DPlanView) return;
       isDragging = true;
       stage3d.classList.add('dragging');
       const p = e.touches ? e.touches[0] : e;
@@ -956,9 +983,35 @@
   densitySlider.addEventListener('input', refresh);
   reliefSlider.addEventListener('input', refresh);
 
+  // Plan view is a fixed top-down orthographic snapshot — auto-orbit is
+  // already suppressed for it (see animate3()), and drag-rotate is a no-op
+  // (see onDown() above). This keeps the orbit-toggle button and the drag
+  // cursor honest about that: both go inert while Plan is active and both
+  // come back the instant you're in plain 3D again.
+  function updatePlanGating(){
+    const orbitBtn = document.getElementById('orbitToggle');
+    orbitBtn.disabled = is3DPlanView;
+    orbitBtn.title = is3DPlanView
+      ? 'Not applicable in Plan view — Plan is a fixed top-down snapshot, there\'s nothing to orbit'
+      : 'Pause or resume the automatic camera orbit in 3D view';
+    stage3d.classList.toggle('plan-locked', is3DPlanView);
+    stage3d.title = is3DPlanView
+      ? 'Plan view — scroll or pinch to zoom (drag-rotate is disabled, Plan is a fixed top-down snapshot)'
+      : 'Drag to rotate · scroll or pinch to zoom';
+  }
+
+  // 3D and Plan are two different camera modes sharing the same underlying
+  // 3D canvas (is3D stays true for both) — but only one camera mode is
+  // actually active at a time, so only one button should read as active.
+  // Previously view3dBtn's .active was tied directly to is3D, so it stayed
+  // lit even after switching into Plan, implying both modes were live.
+  function updateViewButtons(){
+    document.getElementById('view3dBtn').classList.toggle('active', is3D && !is3DPlanView);
+    document.getElementById('planViewBtn').classList.toggle('active', is3DPlanView);
+  }
+
   document.getElementById('view3dBtn').addEventListener('click', () => {
     is3D = !is3D;
-    document.getElementById('view3dBtn').classList.toggle('active', is3D);
     svg.classList.toggle('hidden', is3D);
     stage3d.classList.toggle('active', is3D);
     // Plan view only makes sense inside 3D — leaving 3D must also clear
@@ -966,26 +1019,27 @@
     // (orthographic, no auto-orbit) with no button showing why.
     if(!is3D && is3DPlanView){
       is3DPlanView = false;
-      document.getElementById('planViewBtn').classList.remove('active');
     }
+    updateViewButtons();
+    updatePlanGating();
     applySquareSize();
     if(is3D) refresh();
   });
 
-  document.getElementById('planViewBtn').addEventListener('click', (e) => {
+  document.getElementById('planViewBtn').addEventListener('click', () => {
     is3DPlanView = !is3DPlanView;
-    e.target.classList.toggle('active', is3DPlanView);
     // Plan view only makes sense once already in 3D — clicking it from the
     // 2D view switches into 3D at the same time rather than doing nothing,
     // since "go to plan" is a reasonable thing to ask for from either view.
     if(is3DPlanView && !is3D){
       is3D = true;
-      document.getElementById('view3dBtn').classList.add('active');
       svg.classList.add('hidden');
       stage3d.classList.add('active');
       applySquareSize();
       refresh();
     }
+    updateViewButtons();
+    updatePlanGating();
   });
 
   document.getElementById('orbitToggle').addEventListener('click', (e) => {
