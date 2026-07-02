@@ -554,23 +554,36 @@
 
   function renderBlendSVG(data){
     clearSvg();
-    svg.appendChild(el('rect', {x:0,y:0,width:1000,height:1000,fill:'#FAFAF9'}));
+    // mix-blend-mode:difference computes |backdrop-source| per channel.
+    // Previously the backdrop was paper (~250) and every shape filled
+    // near-black (~10): |250-10|=240, barely different from the
+    // background, and each further overlapping layer only nudged the
+    // color down by ~10 more — with Blend's typical 6-15 shapes, most
+    // regions never accumulated enough overlaps to reach real black. That
+    // produced the washed-out, low-contrast look. Difference blend only
+    // performs a true invert (|x-255|=255-x) when the source is near-
+    // white, so backdrop and shape color are swapped here: ink backdrop,
+    // paper-colored shapes. Every overlap now cleanly toggles black<->white
+    // instead of creeping toward black by ~10 per layer.
+    svg.appendChild(el('rect', {x:0,y:0,width:1000,height:1000,fill:'#0A0A0A'}));
     data.shapes.forEach(sh => {
       let shape;
       if(sh.type === 'circle'){
-        shape = el('circle', {cx:sh.cx, cy:sh.cy, r:sh.r, fill:'#0A0A0A'});
+        shape = el('circle', {cx:sh.cx, cy:sh.cy, r:sh.r, fill:'#FAFAF9'});
       } else {
         shape = el('rect', {
-          x:sh.cx-sh.w/2, y:sh.cy-sh.h/2, width:sh.w, height:sh.h, fill:'#0A0A0A',
+          x:sh.cx-sh.w/2, y:sh.cy-sh.h/2, width:sh.w, height:sh.h, fill:'#FAFAF9',
           transform:`rotate(${sh.rot} ${sh.cx} ${sh.cy})`
         });
       }
       shape.setAttribute('style','mix-blend-mode:difference');
       svg.appendChild(shape);
     });
-    const frame = el('rect', {x:2,y:2,width:996,height:996,fill:'none',stroke:'#0A0A0A','stroke-width':4});
-    frame.setAttribute('style','mix-blend-mode:difference');
-    svg.appendChild(frame);
+    // Frame is a fixed decorative border, not part of the toggling pattern
+    // itself — plain paper-colored stroke (no blend-mode) so it stays a
+    // crisp, stable border against the new dark backdrop, matching the
+    // Truchet/Waves frame convention.
+    svg.appendChild(el('rect', {x:2,y:2,width:996,height:996,fill:'none',stroke:'#FAFAF9','stroke-width':4}));
   }
 
   function renderWavesSVG(data){
