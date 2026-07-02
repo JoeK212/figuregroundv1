@@ -788,6 +788,15 @@
         });
       });
     } else if(mode === 'blend'){
+      // mix-blend-mode:difference (what makes 2D Blend interesting — black
+      // regions invert to white on overlap) has no 3D equivalent: stacking
+      // flat meshes of the same solid inkMat just produces one
+      // undifferentiated black mass once shapes overlap heavily, since
+      // there's no compositing between layers, only subtle height offsets
+      // that are hard to read from most angles. Alternating ink/paper by
+      // stack order instead turns the overlap into literal black/white
+      // banding — visually legible from any angle (including Plan) and
+      // still reads as the same figure/ground theme.
       const layerH = H / Math.max(1,data.shapes.length) * 3.2;
       data.shapes.forEach((sh, i) => {
         let shape;
@@ -798,7 +807,8 @@
         } else {
           shape = rectShape(sh.cx, sh.cy, sh.w, sh.h, sh.rot);
         }
-        group3.add(extrudeMesh(shape, shapeLayerH, inkMat, i*layerH*0.4));
+        const bandMat = (i % 2 === 0) ? inkMat : paperMat;
+        group3.add(extrudeMesh(shape, shapeLayerH, bandMat, i*layerH*0.4));
       });
     } else {
       const bandH = data.bandH;
