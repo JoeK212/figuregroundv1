@@ -115,6 +115,37 @@
            ever lit. Added title-attribute tooltips across the control
            bar, with extra detail on the 3D-specific controls (3D stage
            canvas, Pause orbit, Attractor tuning).
+  v1.7.3 — Added an on-screen "PLAN" badge on the 3D canvas while Plan
+           view is active, a Reset Zoom button, and a Reset Attractors
+           button (Count/Strength/Falloff sliders plus point positions,
+           not just positions). Blend mode's 3D extrusion no longer
+           stacks every shape in solid inkMat — mix-blend-mode:difference
+           (what makes 2D Blend legible) has no 3D equivalent, so heavily
+           overlapping same-color meshes just read as one undifferentiated
+           black mass. Now alternates inkMat/paperMat by stack order for
+           literal black/white banding. Fixed Blend's 2D contrast: the
+           backdrop (paper, ~250) and shape fill (ink, ~10) were the wrong
+           way round for mix-blend-mode:difference — diff(250,10)=240,
+           barely distinct from the 250 backdrop, and each further overlap
+           only nudged the color down by ~10 more. Swapped so shapes fill
+           near-white against an ink backdrop: diff(x,255)=255-x is a true
+           invert, so overlaps now cleanly toggle black/white instead of
+           creeping toward black. Attractor marker color now adapts to
+           mode (paper-colored in Blend's now-dark backdrop, ink-colored
+           elsewhere) — markers were invisible against Blend's new dark
+           background after the above fix. Widened attractor
+           strength/radius seed ranges — average seeded strength only
+           produced a ~1.5x typical peak height multiplier, reading as
+           subtle across most of the canvas. Added a dim fill light
+           (opposite the key light, no shadows) to the 3D scene — with
+           only one directional light + flat ambient, any wall facing away
+           from it read as near-uniform black at grazing viewing angles.
+           Fixed mouse orbit-drag: onDown never called preventDefault, so
+           native text-selection/drag could start mid-orbit and fight the
+           custom rotate handling, reading as the drag "getting stuck"
+           (guarded to mouse-origin events only, since touchstart is
+           passive:true and touch already gets its own preventDefault via
+           onTouchMove).
 -->
 <html lang="en">
 <head>
@@ -176,6 +207,9 @@
   .stage3d{
     display:none;
     cursor:grab;
+    user-select:none;
+    -webkit-user-select:none;
+    touch-action:none;
   }
   .stage3d.dragging{
     cursor:grabbing;
@@ -388,7 +422,7 @@
         <input type="range" id="attractorStrengthSlider" min="25" max="200" value="100" title="How much attractors pull shape height up or down">
         <span class="field-label">Falloff</span>
         <input type="range" id="attractorFalloffSlider" min="50" max="200" value="100" title="Radius of each attractor's influence">
-        <button id="resetAttractorsBtn" title="Reset attractor points back to their original seeded positions, discarding any dragging">Reset attractors</button>
+        <button id="resetAttractorsBtn" title="Reset attractor points, count, strength, and falloff back to defaults, discarding any dragging or tuning">Reset attractors</button>
       </div>
 
       <div class="footer-credit">
@@ -405,7 +439,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
-  const APP_VERSION = 'v1.7.2';
+  const APP_VERSION = 'v1.7.3';
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.getElementById('canvas');
   const seedInput = document.getElementById('seedInput');
@@ -610,8 +644,16 @@
       points.push({
         x: rand(180, 820),
         y: rand(180, 820),
-        radius: rand(180, 420),
-        strength: rand(-0.7, 1.7)
+        // Widened from (180,420)/(-0.7,1.7): the old average seeded
+        // strength (0.5) only produced a ~1.5x typical peak height
+        // multiplier, and the old radius range covered a small fraction
+        // of the 1000x1000 canvas — most shapes fell outside meaningful
+        // falloff entirely. This reads as "subtle" even though rare
+        // high-strength seeds could still be dramatic. New average
+        // strength (~0.75) gives a ~1.75x typical peak, with a larger
+        // falloff radius so more of the canvas actually feels it.
+        radius: rand(220, 520),
+        strength: rand(-1.0, 2.5)
       });
     }
     return points;
@@ -641,10 +683,17 @@
   }
 
   function renderAttractorMarkersSVG(attractors){
+    // Blend's 2D backdrop is now near-black (ink), while Truchet/Waves
+    // stay near-white (paper) — see renderBlendSVG()'s contrast fix.
+    // Markers were hardcoded to ink, which made them nearly invisible
+    // against Blend's dark background: dragging or resetting attractors
+    // worked correctly under the hood, but the visual feedback was
+    // essentially gone in that one mode.
+    const markerColor = (currentMode === 'blend') ? '#FAFAF9' : '#0A0A0A';
     attractors.forEach(a => {
-      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:a.radius, fill:'none', stroke:'#0A0A0A', 'stroke-width':1, opacity:0.12}));
-      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:6, fill:'none', stroke:'#0A0A0A', 'stroke-width':1.5, opacity:0.35}));
-      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:1.5, fill:'#0A0A0A', opacity:0.5}));
+      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:a.radius, fill:'none', stroke:markerColor, 'stroke-width':1, opacity:0.12}));
+      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:6, fill:'none', stroke:markerColor, 'stroke-width':1.5, opacity:0.35}));
+      svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:1.5, fill:markerColor, opacity:0.5}));
     });
   }
 
@@ -700,6 +749,16 @@
     dir.shadow.camera.left = -700; dir.shadow.camera.right = 700;
     dir.shadow.camera.top = 700; dir.shadow.camera.bottom = -700;
     scene3.add(dir);
+    // Fill light, roughly opposite the key light and dimmer, no shadows.
+    // With only one directional light + flat ambient, any vertical wall
+    // facing away from that single light source got lit by ambient alone
+    // (0.55 on a #0A0A0A albedo) — reads as near-uniform black at grazing
+    // viewing angles where side walls dominate the view rather than tops.
+    // This doesn't replace the key light's shadows/contrast, just keeps
+    // the darkest faces from going fully flat.
+    const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+    fill.position.set(-450, 350, -400);
+    scene3.add(fill);
 
     animate3();
   }
@@ -883,6 +942,17 @@
       // so drag-rotate has zero visible effect while Plan is active. Bail
       // out entirely rather than let it silently no-op with a grab cursor.
       if(is3DPlanView) return;
+      // Without this, the browser's native text-selection/drag-image
+      // behavior stays active underneath the custom rotate — a fast mouse
+      // drag can start selecting nearby page text (wordmark, labels)
+      // mid-orbit, which then fights our own mousemove handling for
+      // control of subsequent events and reads as the drag "getting
+      // stuck". onWheel already does this for scroll; onDown never did.
+      // Guarded to mouse-origin events only: touchstart is registered
+      // passive:true (preventDefault there would throw a console warning
+      // and be ignored), and touch dragging already gets its own
+      // preventDefault via onTouchMove's passive:false listener.
+      if(!e.touches) e.preventDefault();
       isDragging = true;
       stage3d.classList.add('dragging');
       const p = e.touches ? e.touches[0] : e;
@@ -1031,15 +1101,19 @@
   });
 
   document.getElementById('resetAttractorsBtn').addEventListener('click', () => {
-    // Dragging mutates a.x/a.y on the live attractors array in place, so a
-    // reset means discarding that array and regenerating fresh from the
-    // seed/count — same call refresh() would make on a seed/count change.
+    // Full reset, not just marker positions: previously this only
+    // regenerated attractorData() (undoing drag) but left the
+    // Count/Strength/Falloff sliders wherever the user had set them —
+    // effectiveAttractors() kept scaling by those slider values, so
+    // tuning a slider and then hitting Reset visibly did nothing.
+    attractorCountSlider.value = 2;
+    attractorStrengthSlider.value = 100;
+    attractorFalloffSlider.value = 100;
     const seed = parseInt(seedInput.value) || 1;
-    const count = parseInt(attractorCountSlider.value);
-    attractors = attractorData(seed, count);
+    attractors = attractorData(seed, 2);
     attractorSeedTrack = seed;
-    attractorCountTrack = count;
-    refreshAfterAttractorDrag();
+    attractorCountTrack = 2;
+    refresh();
   });
 
   // Plan view is a fixed top-down orthographic snapshot — auto-orbit is
