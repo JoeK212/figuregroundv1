@@ -115,6 +115,14 @@
            ever lit. Added title-attribute tooltips across the control
            bar, with extra detail on the 3D-specific controls (3D stage
            canvas, Pause orbit, Attractor tuning).
+  v1.7.4 — Added auto-generate for Plan view: while Plan is active, a new
+           random pattern is generated on a repeating timer (default 5s).
+           "Auto" arms/disarms the timer and an interval select (2/5/10/
+           15/30s) controls its period; the timer only actually runs
+           while is3DPlanView is true, so arming it before entering Plan
+           queues it to start the moment Plan is entered, and it
+           auto-pauses (without disarming) the moment Plan is left —
+           re-entering Plan resumes it with no extra click needed.
   v1.7.3 — Added an on-screen "PLAN" badge on the 3D canvas while Plan
            view is active, a Reset Zoom button, and a Reset Attractors
            button (Count/Strength/Falloff sliders plus point positions,
@@ -327,6 +335,28 @@
     width:90px;
     accent-color:var(--ink);
   }
+  select{
+    background:transparent;
+    border:1px solid rgba(10,10,10,0.3);
+    color:var(--ink);
+    font-family:"Helvetica Neue",sans-serif;
+    font-weight:700;
+    font-size:11px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    padding:8px 8px;
+    cursor:pointer;
+  }
+  select:disabled{opacity:0.35;cursor:not-allowed;}
+  /* Armed-but-waiting (queued to start once Plan view is entered) reads as
+     a lighter outline than the solid-fill .active state used once the
+     timer is actually ticking in Plan — keeps "on" and "running" visually
+     distinct instead of collapsing them into one look. */
+  button.armed{
+    border-style:dashed;
+    color:var(--ink);
+    background:transparent;
+  }
   .footer-credit{
     font-weight:200;
     font-size:10px;
@@ -413,6 +443,14 @@
         <button id="orbitToggle" title="Pause or resume the automatic camera orbit in 3D view">Pause orbit</button>
         <button id="resetZoomBtn" title="Reset zoom to default">Reset zoom</button>
         <button id="attractorToggle" title="Toggle seeded points that pull nearby shapes taller or shorter in 3D — draggable in the 2D view">Attractor</button>
+        <button id="autoGenToggle" title="Auto-generate a new random pattern on a timer while Plan view is active">Auto</button>
+        <select id="autoIntervalSelect" title="Time between auto-generated patterns in Plan view">
+          <option value="2000">2s</option>
+          <option value="5000" selected>5s</option>
+          <option value="10000">10s</option>
+          <option value="15000">15s</option>
+          <option value="30000">30s</option>
+        </select>
       </div>
 
       <div class="group" id="attractorControlsGroup">
@@ -439,7 +477,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
-  const APP_VERSION = 'v1.7.3';
+  const APP_VERSION = 'v1.7.4';
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.getElementById('canvas');
   const seedInput = document.getElementById('seedInput');
@@ -1156,6 +1194,7 @@
     }
     updateViewButtons();
     updatePlanGating();
+    updateAutoGenState();
     applySquareSize();
     if(is3D) refresh();
   });
@@ -1174,6 +1213,48 @@
     }
     updateViewButtons();
     updatePlanGating();
+    updateAutoGenState();
+  });
+
+  // Auto-generate: a repeating timer that regenerates a new random pattern
+  // (same action as the Generate button — new random seed, then refresh())
+  // while Plan view is active. autoGenOn is the user's arm/disarm state and
+  // persists across view changes; autoGenTimer only actually runs while
+  // is3DPlanView is true, so arming it outside Plan queues it rather than
+  // firing immediately, and leaving Plan pauses the timer without
+  // disarming it — re-entering Plan resumes it with no extra click.
+  const autoIntervalSelect = document.getElementById('autoIntervalSelect');
+  let autoGenOn = false;
+  let autoGenTimer = null;
+  let autoGenIntervalMs = parseInt(autoIntervalSelect.value) || 5000;
+
+  function updateAutoGenState(){
+    const running = autoGenOn && is3DPlanView;
+    if(autoGenTimer){ clearInterval(autoGenTimer); autoGenTimer = null; }
+    if(running){
+      autoGenTimer = setInterval(() => {
+        seedInput.value = Math.floor(Math.random()*99999) + 1;
+        refresh();
+      }, autoGenIntervalMs);
+    }
+    const btn = document.getElementById('autoGenToggle');
+    btn.classList.toggle('active', running);
+    btn.classList.toggle('armed', autoGenOn && !running);
+    btn.title = running
+      ? `Auto-generating a new pattern every ${Math.round(autoGenIntervalMs/1000)}s — click to stop`
+      : autoGenOn
+        ? 'Armed — will start generating once Plan view is active'
+        : 'Auto-generate a new random pattern on a timer while Plan view is active';
+  }
+
+  document.getElementById('autoGenToggle').addEventListener('click', () => {
+    autoGenOn = !autoGenOn;
+    updateAutoGenState();
+  });
+
+  autoIntervalSelect.addEventListener('change', () => {
+    autoGenIntervalMs = parseInt(autoIntervalSelect.value) || 5000;
+    updateAutoGenState(); // restart the interval on its new period if running
   });
 
   document.getElementById('orbitToggle').addEventListener('click', (e) => {
