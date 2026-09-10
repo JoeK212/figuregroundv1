@@ -2,175 +2,12 @@
 <!--
   FIGURE / GROUND — Generative Black & White Ambiguity
   Joe.K · axisbim.io
+  https://blackwhitefigurestudies.netlify.app
 
-  CHANGELOG
-  v1.0.0 — Initial build: Truchet, Blend, and Waves generation modes,
-           whole-page invert (filter:invert(1)) as the core interaction,
-           SVG/PNG export.
-  v1.1.0 — Added 3D relief view (Three.js): black regions extruded into
-           physical geometry, auto-orbiting camera, relief-height control.
-           Refactored generators into pure data functions shared by the
-           2D SVG renderer and the 3D scene builder.
-  v1.1.1 — Fixed Three.js CDN path (was "128", cdnjs requires "r128" prefix,
-           causing silent 404 and blank 3D view). Added visible fallback
-           message if the 3D library fails to load.
-  v1.2.0 — Replaced CSS aspect-ratio sizing (unreliable on an empty div)
-           with deterministic JS-computed square sizing for both the SVG
-           and 3D stages, driven by ResizeObserver. Camera now auto-fits
-           to the model's bounding sphere instead of a fixed radius, so
-           framing adapts correctly to relief height and mode. Added
-           click/touch-drag manual orbit control alongside auto-orbit.
-  v1.2.1 — Fixed base plate floating disconnected from the pattern: the
-           rotation applied to lay extruded shapes flat maps local Y to
-           negative world Z, but the base plate was positioned in positive
-           Z, so they only touched at one shared edge instead of fully
-           overlapping.
-  v1.3.0 — Added attractor points: 1-2 seeded points (independent RNG
-           stream, decorrelated from the main pattern seed) modulate each
-           shape's 3D extrusion height via gaussian falloff — taller near
-           positive-strength attractors, shorter near negative ones. 2D
-           view shows a faint marker + influence-radius ring when active.
-  v1.3.1 — Attractor points are now draggable in the 2D view (click/touch
-           and drag a marker). Attractor state is now persistent — only
-           regenerated on a seed change, not on every refresh() — so drag
-           edits survive density/relief/mode changes and toggling the
-           attractor off and back on. Drag redraws reuse cached pattern
-           data instead of re-running the seeded generators, so dragging
-           never perturbs the underlying pattern.
-  v1.4.0 — Added zoom to the 3D view: scroll-wheel dolly on desktop,
-           two-finger pinch on touch. Implemented as a clamped multiplier
-           (0.4x-2.5x) applied on top of the bounding-sphere-derived
-           orbitRadius at render time, so camera framing still comes from
-           the model's actual size, not a hardcoded distance. Single-finger
-           touch-drag now calls preventDefault() during rotation so it no
-           longer fights page scroll on mobile.
-  v1.5.0 — Tuned relief slider behavior for Truchet and Waves: extrusion
-           height is now proportional to each shape's own local footprint
-           (cell size / stripe band height) via reliefScale(relief),
-           instead of a flat global height shared across every density.
-           At high density the old flat height produced needle-like spikes
-           many times taller than their own footprint; height-to-footprint
-           ratio is now consistent across the whole density range. Blend
-           mode's stacked-layer height already normalized against shape
-           count and needed no change.
-  v1.6.0 — Mobile footer credit/version no longer disappears below 720px:
-           added a dedicated .footer-credit-mobile row below the control
-           bar (not inside its horizontally-scrolling area, so it's never
-           scrolled out of view) instead of hiding the credit entirely.
-           Attractor is now tunable: Count (1-4), Strength (0.25x-2x), and
-           Falloff (0.5x-2x radius) sliders, shown only while Attractor is
-           toggled on. Strength/Falloff apply as multipliers at render time
-           via effectiveAttractors() rather than mutating the seeded
-           attractor points, so dragging and seed/count persistence are
-           unaffected; Count changes regenerate attractors the same way a
-           seed change does.
-  v1.6.1 — Fixed washed-out black/white contrast in the 3D view: inkMat and
-           paperMat now set metalness:0 explicitly. Three.js r128's
-           MeshStandardMaterial defaults metalness to 0.5 when unset, which
-           gave even the near-black ink material a strong Fresnel-driven
-           specular response under the overhead light, making top faces
-           read as light gray/near-white instead of black — hard to tell
-           figure from ground in 3D regardless of relief height. Both
-           materials are matte, fully non-metallic surfaces, so this is
-           also just the physically correct value.
-  v1.7.0 — Redesigned the control bar: two explicit wrapping rows instead
-           of one fixed-height row with hidden horizontal overflow, which
-           had started silently clipping controls (Strength/Falloff)
-           off-screen with no visible scroll affordance once Attractor
-           tuning was added. Added a Plan view button — a true
-           OrthographicCamera (not just a perspective camera pointed
-           straight down) snapped to a top-down view of the 3D relief, so
-           the pattern reads without perspective foreshortening. Its
-           frustum size is derived from the same bounding sphere as
-           orbitRadius, and zoomFactor scales it the same direction as
-           perspective zoom. Auto-orbit is suppressed while in plan view.
-           Clicking Plan from the 2D view auto-enables 3D rather than
-           doing nothing.
-  v1.7.1 — Fixed Plan view state leaking across 3D toggles: leaving 3D
-           (via the 3D button) didn't clear is3DPlanView or the Plan
-           button's active class, so re-entering 3D later silently
-           dropped back into Plan (orthographic, no auto-orbit) with no
-           button showing why. Leaving 3D now also clears Plan state.
-           Blend mode switched from pure uniform-random shape placement
-           to jittered-grid placement: uniform random points reliably
-           read as "clumped" to the eye even though nothing was actually
-           wrong with the math. Canvas is now divided into a shuffled
-           grid sized to the shape count, with jitter within each cell,
-           spreading shapes across the full canvas while keeping
-           placement randomized.
-  v1.7.2 — Plan view no longer offers 3D interactions it can't actually
-           perform: drag-rotate is a no-op in Plan (animate3()'s ortho
-           branch derives camera position from orbitTarget every frame,
-           ignoring theta3/phi3 entirely), so drag is now disabled and the
-           grab cursor suppressed while Plan is active. "Pause orbit" is
-           disabled the same way, with its tooltip explaining why, since
-           auto-orbit was already a no-op in Plan. Zoom (wheel + pinch)
-           remains active in Plan, since it correctly scales the
-           orthographic frustum the same direction it scales perspective
-           distance elsewhere. Fixed 3D/Plan button state: both buttons
-           could read as active simultaneously, implying two camera modes
-           were live at once, when only one ever is — view3dBtn's active
-           state is now is3D && !is3DPlanView instead of just is3D, via a
-           shared updateViewButtons() helper, so only one of the two is
-           ever lit. Added title-attribute tooltips across the control
-           bar, with extra detail on the 3D-specific controls (3D stage
-           canvas, Pause orbit, Attractor tuning).
-  v1.7.4 — Added auto-generate for Plan view: while Plan is active, a new
-           random pattern is generated on a repeating timer (default 5s).
-           "Auto" arms/disarms the timer and an interval select (2/5/10/
-           15/30s) controls its period; the timer only actually runs
-           while is3DPlanView is true, so arming it before entering Plan
-           queues it to start the moment Plan is entered, and it
-           auto-pauses (without disarming) the moment Plan is left —
-           re-entering Plan resumes it with no extra click needed.
-  v1.7.3 — Added an on-screen "PLAN" badge on the 3D canvas while Plan
-           view is active, a Reset Zoom button, and a Reset Attractors
-           button (Count/Strength/Falloff sliders plus point positions,
-           not just positions). Blend mode's 3D extrusion no longer
-           stacks every shape in solid inkMat — mix-blend-mode:difference
-           (what makes 2D Blend legible) has no 3D equivalent, so heavily
-           overlapping same-color meshes just read as one undifferentiated
-           black mass. Now alternates inkMat/paperMat by stack order for
-           literal black/white banding. Fixed Blend's 2D contrast: the
-           backdrop (paper, ~250) and shape fill (ink, ~10) were the wrong
-           way round for mix-blend-mode:difference — diff(250,10)=240,
-           barely distinct from the 250 backdrop, and each further overlap
-           only nudged the color down by ~10 more. Swapped so shapes fill
-           near-white against an ink backdrop: diff(x,255)=255-x is a true
-           invert, so overlaps now cleanly toggle black/white instead of
-           creeping toward black. Attractor marker color now adapts to
-           mode (paper-colored in Blend's now-dark backdrop, ink-colored
-           elsewhere) — markers were invisible against Blend's new dark
-           background after the above fix. Widened attractor
-           strength/radius seed ranges — average seeded strength only
-           produced a ~1.5x typical peak height multiplier, reading as
-           subtle across most of the canvas. Added a dim fill light
-           (opposite the key light, no shadows) to the 3D scene — with
-           only one directional light + flat ambient, any wall facing away
-           from it read as near-uniform black at grazing viewing angles.
-           Fixed mouse orbit-drag: onDown never called preventDefault, so
-           native text-selection/drag could start mid-orbit and fight the
-           custom rotate handling, reading as the drag "getting stuck"
-           (guarded to mouse-origin events only, since touchstart is
-           passive:true and touch already gets its own preventDefault via
-           onTouchMove).
-  v1.7.5 — Re-added the small-screen gate (below 700px on either
-           dimension, .app is replaced by a "requires a tablet or desktop
-           display" message) after a prior attempt to add it broke
-           functionality. This pass was applied as a minimal, purely
-           additive patch directly on top of v1.7.4 — new CSS block plus
-           one new #mobileGate element inserted right before <div
-           class="app">, nothing else touched. Diffed against the
-           pre-patch file to confirm no other lines changed.
-  v1.7.6 — Auto-generate now starts immediately on page load instead of
-           only running once armed and inside Plan view: default interval
-           dropped from 5s to 2s (selected by default in the interval
-           picker), and the timer's running state is no longer gated on
-           is3DPlanView — it now runs in any view, since the point is to
-           actively showcase the tool the moment someone opens the page,
-           not just while parked in Plan. Removed the now-dead "armed"
-           button state and its CSS, since there's no more queued-but-
-           not-yet-running condition to distinguish from "running."
+  Three pattern modes (Truchet, Blend, Waves), each with a matching 2D
+  SVG view and an extruded 3D relief view (Three.js) with seeded
+  "attractor" points that locally raise or lower relief height. Single
+  static HTML file, no build step.
 -->
 <html lang="en">
 <head>
@@ -623,11 +460,8 @@
     const pick = (arr) => arr[Math.floor(rnd()*arr.length)];
     const count = 6 + density * 3;
     const shapes = [];
-    // Jittered-grid placement instead of pure uniform-random cx/cy: uniform
-    // random points reliably look "clumped" to the eye (several shapes
-    // landing near each other by chance, other regions left empty). Laying
-    // out a shuffled grid and jittering within each cell keeps placement
-    // randomized while spreading shapes across the full canvas.
+    // Jittered-grid placement (not pure uniform-random) avoids shapes
+    // visually clumping together, while keeping placement randomized.
     const cols = Math.ceil(Math.sqrt(count));
     const rows = Math.ceil(count / cols);
     const cellW = 1000 / cols, cellH = 1000 / rows;
@@ -704,17 +538,10 @@
 
   function renderBlendSVG(data){
     clearSvg();
-    // mix-blend-mode:difference computes |backdrop-source| per channel.
-    // Previously the backdrop was paper (~250) and every shape filled
-    // near-black (~10): |250-10|=240, barely different from the
-    // background, and each further overlapping layer only nudged the
-    // color down by ~10 more — with Blend's typical 6-15 shapes, most
-    // regions never accumulated enough overlaps to reach real black. That
-    // produced the washed-out, low-contrast look. Difference blend only
-    // performs a true invert (|x-255|=255-x) when the source is near-
-    // white, so backdrop and shape color are swapped here: ink backdrop,
-    // paper-colored shapes. Every overlap now cleanly toggles black<->white
-    // instead of creeping toward black by ~10 per layer.
+    // mix-blend-mode:difference computes |backdrop-source| per channel and
+    // only performs a true invert (|x-255|=255-x) against a near-white
+    // source — so shapes fill near-white against an ink backdrop, giving
+    // a clean black<->white toggle on overlap.
     svg.appendChild(el('rect', {x:0,y:0,width:1000,height:1000,fill:'#0A0A0A'}));
     data.shapes.forEach(sh => {
       let shape;
@@ -729,10 +556,8 @@
       shape.setAttribute('style','mix-blend-mode:difference');
       svg.appendChild(shape);
     });
-    // Frame is a fixed decorative border, not part of the toggling pattern
-    // itself — plain paper-colored stroke (no blend-mode) so it stays a
-    // crisp, stable border against the new dark backdrop, matching the
-    // Truchet/Waves frame convention.
+    // Frame border: plain paper-colored stroke, no blend-mode, matching
+    // the Truchet/Waves frame convention.
     svg.appendChild(el('rect', {x:2,y:2,width:996,height:996,fill:'none',stroke:'#FAFAF9','stroke-width':4}));
   }
 
@@ -760,14 +585,9 @@
       points.push({
         x: rand(180, 820),
         y: rand(180, 820),
-        // Widened from (180,420)/(-0.7,1.7): the old average seeded
-        // strength (0.5) only produced a ~1.5x typical peak height
-        // multiplier, and the old radius range covered a small fraction
-        // of the 1000x1000 canvas — most shapes fell outside meaningful
-        // falloff entirely. This reads as "subtle" even though rare
-        // high-strength seeds could still be dramatic. New average
-        // strength (~0.75) gives a ~1.75x typical peak, with a larger
-        // falloff radius so more of the canvas actually feels it.
+        // strength/radius ranges tuned so a typical seeded attractor
+        // produces a clearly visible height change across a meaningful
+        // portion of the canvas, not just a faint local bump.
         radius: rand(220, 520),
         strength: rand(-1.0, 2.5)
       });
@@ -786,11 +606,8 @@
   }
 
   // Strength/Falloff sliders scale the seeded attractor points at use time
-  // rather than mutating attractorData()'s output — this keeps the raw
-  // `attractors` array (positions, seeded radius/strength) stable for the
-  // seed/count persistence checks in refresh(), and means dragging a
-  // marker still starts from its true seeded position even after the
-  // sliders have been tuned away from their 1x defaults.
+  // rather than mutating attractorData()'s output, so a dragged marker's
+  // true seeded position is preserved even after tuning the sliders.
   function effectiveAttractors(){
     if(!attractors.length) return [];
     const sMult = parseInt(attractorStrengthSlider.value) / 100;
@@ -799,12 +616,8 @@
   }
 
   function renderAttractorMarkersSVG(attractors){
-    // Blend's 2D backdrop is now near-black (ink), while Truchet/Waves
-    // stay near-white (paper) — see renderBlendSVG()'s contrast fix.
-    // Markers were hardcoded to ink, which made them nearly invisible
-    // against Blend's dark background: dragging or resetting attractors
-    // worked correctly under the hood, but the visual feedback was
-    // essentially gone in that one mode.
+    // Marker color adapts to mode: paper-colored on Blend's dark backdrop,
+    // ink-colored on Truchet/Waves' light backdrop.
     const markerColor = (currentMode === 'blend') ? '#FAFAF9' : '#0A0A0A';
     attractors.forEach(a => {
       svg.appendChild(el('circle', {cx:a.x, cy:a.y, r:a.radius, fill:'none', stroke:markerColor, 'stroke-width':1, opacity:0.12}));
@@ -825,19 +638,14 @@
   let orbitTarget = {x:0, y:60, z:0};
   let orbitRadius = 950;
   let isDragging = false;
-  // Zoom is a multiplier applied on top of the bounding-sphere-derived
-  // orbitRadius, never a replacement for it — buildScene3D() still owns
-  // the base framing calculation per the camera-radius invariant.
+  // Zoom is a multiplier on top of the bounding-sphere-derived orbitRadius,
+  // never a replacement for it — buildScene3D() still owns base framing.
   const MIN_ZOOM = 0.4, MAX_ZOOM = 2.5;
   let zoomFactor = 1;
-  // Plan view swaps to a true OrthographicCamera looking straight down,
-  // rather than just pointing the perspective camera downward — a
-  // perspective camera retains foreshortening at any angle, which would
-  // still distort the relief pattern relative to the flat 2D SVG plan.
-  // planOrthoHalf (the camera's half-width/height) is derived from the
-  // same bounding sphere buildScene3D() already computes for orbitRadius,
-  // so it stays in sync with model size the same way perspective framing
-  // does — see the camera-radius invariant.
+  // Plan view uses a true OrthographicCamera looking straight down (not a
+  // perspective camera pointed downward, which would still foreshorten).
+  // planOrthoHalf is derived from the same bounding sphere as orbitRadius,
+  // so it stays in sync with model size.
   let is3DPlanView = false;
   let planOrthoHalf = 700;
 
@@ -865,13 +673,9 @@
     dir.shadow.camera.left = -700; dir.shadow.camera.right = 700;
     dir.shadow.camera.top = 700; dir.shadow.camera.bottom = -700;
     scene3.add(dir);
-    // Fill light, roughly opposite the key light and dimmer, no shadows.
-    // With only one directional light + flat ambient, any vertical wall
-    // facing away from that single light source got lit by ambient alone
-    // (0.55 on a #0A0A0A albedo) — reads as near-uniform black at grazing
-    // viewing angles where side walls dominate the view rather than tops.
-    // This doesn't replace the key light's shadows/contrast, just keeps
-    // the darkest faces from going fully flat.
+    // Fill light, roughly opposite the key light and dimmer, no shadows —
+    // keeps walls facing away from the key light from reading as flat
+    // black at grazing viewing angles.
     const fill = new THREE.DirectionalLight(0xffffff, 0.35);
     fill.position.set(-450, 350, -400);
     scene3.add(fill);
@@ -916,18 +720,11 @@
     return mesh;
   }
 
-  // Truchet and Waves extrude each shape at a height derived from that
-  // shape's own local footprint (cell size / stripe band height) rather
-  // than a flat global constant. A flat constant meant relief=10 at high
-  // density (small cells/thin stripes) produced needle-like spikes many
-  // times taller than their own footprint, since footprint shrinks with
-  // density but the old height didn't. Scaling by footprint keeps the
-  // height-to-footprint ratio — and so the relief slider's visual effect —
-  // consistent across the whole density range. relief=1 -> ~0.42x
-  // footprint (subtle), relief=10 -> ~1.68x footprint (dramatic peak).
-  // Blend mode is unaffected: its layered-stack height already normalizes
-  // against shape count rather than a single shared H, so it doesn't
-  // exhibit the same spike problem at extremes.
+  // Truchet and Waves extrude each shape at a height derived from its own
+  // local footprint (cell size / stripe band height), not a flat global
+  // constant — keeps the height-to-footprint ratio consistent across the
+  // density range. relief=1 -> ~0.42x footprint, relief=10 -> ~1.68x.
+  // Blend's layered-stack height already normalizes against shape count.
   function reliefScale(relief){
     return 0.28 + relief * 0.14;
   }
@@ -938,15 +735,11 @@
     if(group3) scene3.remove(group3);
     group3 = new THREE.Group();
 
-    // metalness is set explicitly to 0 on both materials. Three.js r128's
+    // metalness explicitly 0 on both materials: Three.js r128's
     // MeshStandardMaterial defaults metalness to 0.5 when unset, which
-    // gives even a near-black albedo (0x0A0A0A) a strong Fresnel-driven
-    // specular response under the overhead directional light — the ink
-    // shapes' top faces were catching enough of that reflection to read
-    // as light gray/near-white instead of black, which is exactly what
-    // made black/white hard to tell apart in the 3D view even at low
-    // relief. Both "ink" and "paper" are matte, fully non-metallic
-    // surfaces, so metalness:0 is also just the physically correct value.
+    // gives a strong Fresnel specular response that washes out black/white
+    // contrast. Both surfaces are matte and non-metallic, so this is also
+    // the physically correct value.
     const inkMat = new THREE.MeshStandardMaterial({color:0x0A0A0A, roughness:0.65, metalness:0});
     const paperMat = new THREE.MeshStandardMaterial({color:0xFAFAF9, roughness:0.85, metalness:0});
 
@@ -976,15 +769,10 @@
         });
       });
     } else if(mode === 'blend'){
-      // mix-blend-mode:difference (what makes 2D Blend interesting — black
-      // regions invert to white on overlap) has no 3D equivalent: stacking
-      // flat meshes of the same solid inkMat just produces one
-      // undifferentiated black mass once shapes overlap heavily, since
-      // there's no compositing between layers, only subtle height offsets
-      // that are hard to read from most angles. Alternating ink/paper by
-      // stack order instead turns the overlap into literal black/white
-      // banding — visually legible from any angle (including Plan) and
-      // still reads as the same figure/ground theme.
+      // mix-blend-mode:difference (what makes 2D Blend legible) has no 3D
+      // equivalent, so stacked shapes alternate ink/paper materials by
+      // stack order for literal black/white banding, legible from any
+      // angle including Plan.
       const layerH = H / Math.max(1,data.shapes.length) * 3.2;
       data.shapes.forEach((sh, i) => {
         let shape;
@@ -1054,20 +842,15 @@
 
     const onDown = (e) => {
       // Plan view's camera is fully derived from orbitTarget every frame
-      // (see animate3()'s is3DPlanView branch) — theta3/phi3 are ignored,
-      // so drag-rotate has zero visible effect while Plan is active. Bail
-      // out entirely rather than let it silently no-op with a grab cursor.
+      // (see animate3()'s is3DPlanView branch), so drag-rotate has no
+      // visible effect while Plan is active — bail out rather than show a
+      // grab cursor that does nothing.
       if(is3DPlanView) return;
-      // Without this, the browser's native text-selection/drag-image
-      // behavior stays active underneath the custom rotate — a fast mouse
-      // drag can start selecting nearby page text (wordmark, labels)
-      // mid-orbit, which then fights our own mousemove handling for
-      // control of subsequent events and reads as the drag "getting
-      // stuck". onWheel already does this for scroll; onDown never did.
-      // Guarded to mouse-origin events only: touchstart is registered
-      // passive:true (preventDefault there would throw a console warning
-      // and be ignored), and touch dragging already gets its own
-      // preventDefault via onTouchMove's passive:false listener.
+      // preventDefault guards against native text-selection/drag starting
+      // mid-orbit on mouse. Guarded to mouse-origin events only: touchstart
+      // is registered passive:true (preventDefault there would throw), and
+      // touch dragging already gets its own preventDefault via
+      // onTouchMove's passive:false listener.
       if(!e.touches) e.preventDefault();
       isDragging = true;
       stage3d.classList.add('dragging');
@@ -1127,8 +910,7 @@
   function animate3(){
     animFrame3 = requestAnimationFrame(animate3);
     // Auto-orbit is meaningless in plan view (a top-down ortho camera
-    // spinning around its own look axis doesn't change what's visible)
-    // and would just make the plan silently drift if left running, so it's
+    // spinning around its own look axis changes nothing visible), so it's
     // suppressed the same way isDragging suppresses it.
     if(orbiting && !isDragging && !is3DPlanView) theta3 += 0.0035;
     if(is3DPlanView){
@@ -1179,11 +961,9 @@
     if(is3D){ buildScene3D(currentMode, data, relief, effectiveAttractors()); applySquareSize(); }
   }
 
-  // Lightweight redraw used while dragging an attractor marker, or when the
-  // Strength/Falloff sliders change — reuses the already-generated pattern
-  // data instead of re-running the (seeded, RNG-consuming) data generators,
-  // so neither dragging a marker nor tuning strength/falloff ever perturbs
-  // the underlying pattern.
+  // Lightweight redraw used while dragging an attractor marker, or when
+  // Strength/Falloff change — reuses the already-generated pattern data
+  // instead of re-running the seeded (RNG-consuming) data generators.
   function refreshAfterAttractorDrag(){
     if(currentMode === 'truchet') renderTruchetSVG(lastData);
     else if(currentMode === 'blend') renderBlendSVG(lastData);
@@ -1217,11 +997,8 @@
   });
 
   document.getElementById('resetAttractorsBtn').addEventListener('click', () => {
-    // Full reset, not just marker positions: previously this only
-    // regenerated attractorData() (undoing drag) but left the
-    // Count/Strength/Falloff sliders wherever the user had set them —
-    // effectiveAttractors() kept scaling by those slider values, so
-    // tuning a slider and then hitting Reset visibly did nothing.
+    // Full reset: Count/Strength/Falloff sliders back to defaults plus
+    // regenerated point positions, not just positions alone.
     attractorCountSlider.value = 2;
     attractorStrengthSlider.value = 100;
     attractorFalloffSlider.value = 100;
@@ -1232,11 +1009,9 @@
     refresh();
   });
 
-  // Plan view is a fixed top-down orthographic snapshot — auto-orbit is
-  // already suppressed for it (see animate3()), and drag-rotate is a no-op
-  // (see onDown() above). This keeps the orbit-toggle button and the drag
-  // cursor honest about that: both go inert while Plan is active and both
-  // come back the instant you're in plain 3D again.
+  // Plan view is a fixed top-down orthographic snapshot — auto-orbit and
+  // drag-rotate are both no-ops in Plan, so this keeps the orbit-toggle
+  // button and drag cursor honest about that.
   function updatePlanGating(){
     const orbitBtn = document.getElementById('orbitToggle');
     orbitBtn.disabled = is3DPlanView;
@@ -1250,11 +1025,9 @@
       : 'Drag to rotate · scroll or pinch to zoom';
   }
 
-  // 3D and Plan are two different camera modes sharing the same underlying
-  // 3D canvas (is3D stays true for both) — but only one camera mode is
-  // actually active at a time, so only one button should read as active.
-  // Previously view3dBtn's .active was tied directly to is3D, so it stayed
-  // lit even after switching into Plan, implying both modes were live.
+  // 3D and Plan share the same underlying canvas (is3D stays true for
+  // both), but only one camera mode is active at a time — only one button
+  // should read as active.
   function updateViewButtons(){
     document.getElementById('view3dBtn').classList.toggle('active', is3D && !is3DPlanView);
     document.getElementById('planViewBtn').classList.toggle('active', is3DPlanView);
@@ -1265,8 +1038,7 @@
     svg.classList.toggle('hidden', is3D);
     stage3d.classList.toggle('active', is3D);
     // Plan view only makes sense inside 3D — leaving 3D must also clear
-    // Plan state, or re-entering 3D later silently drops back into Plan
-    // (orthographic, no auto-orbit) with no button showing why.
+    // Plan state.
     if(!is3D && is3DPlanView){
       is3DPlanView = false;
     }
@@ -1279,9 +1051,8 @@
 
   document.getElementById('planViewBtn').addEventListener('click', () => {
     is3DPlanView = !is3DPlanView;
-    // Plan view only makes sense once already in 3D — clicking it from the
-    // 2D view switches into 3D at the same time rather than doing nothing,
-    // since "go to plan" is a reasonable thing to ask for from either view.
+    // Plan view only makes sense once already in 3D — clicking it from
+    // the 2D view switches into 3D at the same time.
     if(is3DPlanView && !is3D){
       is3D = true;
       svg.classList.add('hidden');
@@ -1295,12 +1066,8 @@
   });
 
   // Auto-generate: a repeating timer that regenerates a new random pattern
-  // (same action as the Generate button — new random seed, then refresh())
-  // on a fixed interval, starting immediately on page load. Runs in any
-  // view (2D or 3D/Plan) — it's a "showcase" default so the tool is
-  // actively demonstrating itself the moment someone opens it, not just
-  // while parked in Plan view. autoGenOn is the user's on/off state;
-  // click the Auto button to stop it and explore a pattern manually.
+  // (same as the Generate button) on a fixed interval, starting on page
+  // load and running in any view. autoGenOn is the user's on/off state.
   const autoIntervalSelect = document.getElementById('autoIntervalSelect');
   let autoGenOn = true;
   let autoGenTimer = null;
